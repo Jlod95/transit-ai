@@ -1,0 +1,39 @@
+# CI = "continuous integration". GitHub runs this file automatically on its
+# own servers to check that the code still lints and passes its tests.
+name: CI
+
+# When to run: on every push to any branch, and on every pull request.
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    # A fresh Linux virtual machine that GitHub provides for free.
+    runs-on: ubuntu-latest
+
+    steps:
+      # Download this repository's code onto the virtual machine.
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      # Install Python 3.12, the same version the Dockerfile uses.
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Install the app's packages and the testing/linting tools.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      # Lint: look for mistakes such as unused imports or undefined names.
+      # Settings come from pyproject.toml.
+      - name: Run ruff
+        run: ruff check .
+
+      # Run the automated tests in the tests/ folder.
+      - name: Run pytest
+        run: pytest
