@@ -1,0 +1,4 @@
+route_id,agency_id,route_short_name,route_long_name,route_type
+R1,MINI,1,Bus One,3
+R2,MINI,2,Bus Two,3
+F1,MINI,F,Test Ferry,4

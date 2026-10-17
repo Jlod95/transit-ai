@@ -1,0 +1,7 @@
+route_id,service_id,trip_id,block_id
+R1,WEEKDAY,T1,A
+R1,WEEKDAY,T2,A
+R2,WEEKDAY,T3,A
+R2,WEEKDAY,T4,B
+R2,WEEKDAY,T5,B
+F1,WEEKDAY,FT1,C
