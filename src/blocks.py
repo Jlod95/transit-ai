@@ -18,6 +18,22 @@ FERRY_ROUTE_TYPE = "4"
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
 
+class MissingDistanceError(Exception):
+    """Some bus trips running on the date have no shape_dist_traveled values at all.
+
+    missing maps each affected trip_id to its block_id.
+    """
+
+    def __init__(self, missing):
+        self.missing = missing
+        listed = ", ".join(f"trip {t} (block {b})" for t, b in sorted(missing.items())[:10])
+        more = f" and {len(missing) - 10} more" if len(missing) > 10 else ""
+        super().__init__(
+            f"{len(missing)} bus trip(s) have no shape_dist_traveled, so their block distances "
+            f"would be wrong: {listed}{more}"
+        )
+
+
 def _read_table(zf, name):
     """Yield rows of a GTFS file in the zip as dicts; yields nothing if the file is missing."""
     for member in zf.namelist():
@@ -84,15 +100,22 @@ def daily_block_distance(feed_path, service_date: date) -> dict[str, float]:
     Trip length is the largest shape_dist_traveled in stop_times.txt for that trip.
     Ferries (route_type 4) and trips without a block_id are excluded. Deadhead
     (empty running between trips or to/from the garage) is not in GTFS, so it is not counted.
+
+    Raises MissingDistanceError if any of those bus trips has no shape_dist_traveled values,
+    rather than silently counting it as 0 km.
     """
     with zipfile.ZipFile(feed_path) as zf:
         trip_block = _bus_trip_blocks(zf, service_date)
 
-        trip_length = defaultdict(float)
+        trip_length = {}
         for row in _read_table(zf, "stop_times.txt"):
             dist = (row.get("shape_dist_traveled") or "").strip()
             if dist and row["trip_id"] in trip_block:
-                trip_length[row["trip_id"]] = max(trip_length[row["trip_id"]], float(dist))
+                trip_length[row["trip_id"]] = max(trip_length.get(row["trip_id"], 0.0), float(dist))
+
+    missing = {t: b for t, b in trip_block.items() if t not in trip_length}
+    if missing:
+        raise MissingDistanceError(missing)
 
     block_distance = defaultdict(float)
     for trip_id, block_id in trip_block.items():

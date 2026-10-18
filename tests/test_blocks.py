@@ -1,10 +1,17 @@
+import csv
+import io
 import zipfile
 from datetime import date
 from pathlib import Path
 
 import pytest
 
-from src.blocks import daily_block_distance, daily_block_duration, gtfs_time_to_seconds
+from src.blocks import (
+    MissingDistanceError,
+    daily_block_distance,
+    daily_block_duration,
+    gtfs_time_to_seconds,
+)
 
 HALIFAX_FEED = Path(__file__).parent.parent / "data" / "raw" / "halifax.zip"
 MINI_FEED_DIR = Path(__file__).parent / "fixtures" / "mini_feed"
@@ -23,6 +30,27 @@ def mini_feed(tmp_path):
     return zip_path
 
 
+@pytest.fixture
+def mini_feed_missing_t4(tmp_path):
+    """The mini feed with every shape_dist_traveled for bus trip T4 (block B) blanked."""
+    zip_path = tmp_path / "mini_feed_missing_t4.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        for txt in MINI_FEED_DIR.glob("*.txt"):
+            if txt.name != "stop_times.txt":
+                zf.write(txt, arcname=txt.name)
+                continue
+            rows = list(csv.DictReader(txt.open(newline="")))
+            for row in rows:
+                if row["trip_id"] == "T4":
+                    row["shape_dist_traveled"] = ""
+            out = io.StringIO()
+            writer = csv.DictWriter(out, fieldnames=rows[0].keys())
+            writer.writeheader()
+            writer.writerows(rows)
+            zf.writestr("stop_times.txt", out.getvalue())
+    return zip_path
+
+
 def test_mini_feed_weekday_totals(mini_feed):
     # Block A: T1 10 + T2 10 + T3 5 = 25 km. Block B: T4 15 + T5 15 = 30 km.
     distances = daily_block_distance(mini_feed, date(2026, 10, 14))  # Wednesday
@@ -38,6 +66,14 @@ def test_mini_feed_excludes_ferry(mini_feed):
 def test_mini_feed_exception_date_has_no_blocks(mini_feed):
     # calendar_dates.txt removes the WEEKDAY service on Monday 12 Oct 2026.
     assert daily_block_distance(mini_feed, date(2026, 10, 12)) == {}
+
+
+def test_trip_without_distances_raises(mini_feed_missing_t4):
+    # Counting T4 as 0 km would silently report block B as 15 km instead of 30.
+    with pytest.raises(MissingDistanceError) as error:
+        daily_block_distance(mini_feed_missing_t4, date(2026, 10, 14))
+    assert error.value.missing == {"T4": "B"}
+    assert "trip T4 (block B)" in str(error.value)
 
 
 @needs_halifax
