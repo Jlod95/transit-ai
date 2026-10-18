@@ -50,6 +50,34 @@ def _active_service_ids(zf, service_date):
     return active
 
 
+def _bus_trip_blocks(zf, service_date):
+    """Return {trip_id: block_id} for bus trips with a block_id running on service_date.
+
+    Ferries (route_type 4) and trips without a block_id are excluded.
+    """
+    ferry_routes = {
+        row["route_id"]
+        for row in _read_table(zf, "routes.txt")
+        if row["route_type"] == FERRY_ROUTE_TYPE
+    }
+    services = _active_service_ids(zf, service_date)
+
+    trip_block = {}
+    for row in _read_table(zf, "trips.txt"):
+        block_id = (row.get("block_id") or "").strip()
+        if block_id and row["service_id"] in services and row["route_id"] not in ferry_routes:
+            trip_block[row["trip_id"]] = block_id
+    return trip_block
+
+
+def gtfs_time_to_seconds(text):
+    """Convert a GTFS time like "26:01:00" to seconds after midnight at the start of the
+    service day. Hours can be 24 or more for trips after midnight, and are not wrapped to 0.
+    """
+    hours, minutes, seconds = (int(part) for part in text.strip().split(":"))
+    return hours * 3600 + minutes * 60 + seconds
+
+
 def daily_block_distance(feed_path, service_date: date) -> dict[str, float]:
     """Return {block_id: revenue km} for bus blocks running on service_date.
 
@@ -58,18 +86,7 @@ def daily_block_distance(feed_path, service_date: date) -> dict[str, float]:
     (empty running between trips or to/from the garage) is not in GTFS, so it is not counted.
     """
     with zipfile.ZipFile(feed_path) as zf:
-        ferry_routes = {
-            row["route_id"]
-            for row in _read_table(zf, "routes.txt")
-            if row["route_type"] == FERRY_ROUTE_TYPE
-        }
-        services = _active_service_ids(zf, service_date)
-
-        trip_block = {}
-        for row in _read_table(zf, "trips.txt"):
-            block_id = (row.get("block_id") or "").strip()
-            if block_id and row["service_id"] in services and row["route_id"] not in ferry_routes:
-                trip_block[row["trip_id"]] = block_id
+        trip_block = _bus_trip_blocks(zf, service_date)
 
         trip_length = defaultdict(float)
         for row in _read_table(zf, "stop_times.txt"):
@@ -81,3 +98,33 @@ def daily_block_distance(feed_path, service_date: date) -> dict[str, float]:
     for trip_id, block_id in trip_block.items():
         block_distance[block_id] += trip_length[trip_id]
     return dict(block_distance)
+
+
+def daily_block_duration(feed_path, service_date: date) -> dict[str, float]:
+    """Return {block_id: minutes} from first departure to last arrival, for bus blocks
+    running on service_date.
+
+    Times within a block only move forward, so the earliest departure and the latest
+    arrival across all its stop times are the first trip's start and the last trip's end.
+    Uses the same trip filtering as daily_block_distance.
+    """
+    with zipfile.ZipFile(feed_path) as zf:
+        trip_block = _bus_trip_blocks(zf, service_date)
+
+        block_start = {}
+        block_end = {}
+        for row in _read_table(zf, "stop_times.txt"):
+            block_id = trip_block.get(row["trip_id"])
+            if block_id is None:
+                continue
+            # Stops between timepoints may have blank times; skip those.
+            departure = (row.get("departure_time") or "").strip()
+            arrival = (row.get("arrival_time") or "").strip()
+            if departure:
+                start = gtfs_time_to_seconds(departure)
+                block_start[block_id] = min(block_start.get(block_id, start), start)
+            if arrival:
+                end = gtfs_time_to_seconds(arrival)
+                block_end[block_id] = max(block_end.get(block_id, end), end)
+
+    return {block_id: (block_end[block_id] - block_start[block_id]) / 60 for block_id in block_start}

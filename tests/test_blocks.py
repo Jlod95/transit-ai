@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src.blocks import daily_block_distance
+from src.blocks import daily_block_distance, daily_block_duration, gtfs_time_to_seconds
 
 HALIFAX_FEED = Path(__file__).parent.parent / "data" / "raw" / "halifax.zip"
 MINI_FEED_DIR = Path(__file__).parent / "fixtures" / "mini_feed"
@@ -44,3 +44,21 @@ def test_mini_feed_exception_date_has_no_blocks(mini_feed):
 def test_block_722145_on_a_weekday():
     distances = daily_block_distance(HALIFAX_FEED, date(2026, 10, 14))
     assert distances["722145"] == pytest.approx(80.5, abs=0.1)
+
+
+def test_gtfs_time_past_midnight_is_not_wrapped():
+    # 26:01:00 is 2:01am the next morning, still on the same service day.
+    assert gtfs_time_to_seconds("26:01:00") == 93_660
+
+
+def test_mini_feed_block_durations(mini_feed):
+    # Block A: T1 departs 06:00, T3 arrives 07:40 = 100 min. Block B: 08:00 to 09:45 = 105 min.
+    durations = daily_block_duration(mini_feed, date(2026, 10, 14))
+    assert durations == pytest.approx({"A": 100.0, "B": 105.0})
+
+
+@needs_halifax
+def test_block_722145_duration_on_a_weekday():
+    # First departure 5:32, last arrival 8:48.
+    durations = daily_block_duration(HALIFAX_FEED, date(2026, 10, 14))
+    assert durations["722145"] == pytest.approx(196)
