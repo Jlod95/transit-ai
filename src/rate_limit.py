@@ -11,13 +11,13 @@ running instance; they reset if the app restarts.
 import math
 import threading
 from collections import defaultdict, deque
-from datetime import datetime, time, timedelta, timezone
+from datetime import UTC, datetime, time, timedelta
 
 MINUTE = timedelta(minutes=1)
 
 
 def utc_now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def describe_wait(seconds):
@@ -98,5 +98,5 @@ class QuestionLimiter:
 
     @staticmethod
     def _seconds_until_tomorrow(now):
-        midnight = datetime.combine(now.date() + timedelta(days=1), time(0), tzinfo=timezone.utc)
+        midnight = datetime.combine(now.date() + timedelta(days=1), time(0), tzinfo=UTC)
         return math.ceil((midnight - now).total_seconds())

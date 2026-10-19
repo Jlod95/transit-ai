@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,7 +25,7 @@ class FakeClock:
     """A clock that only moves when the test says so, so no test has to sleep."""
 
     def __init__(self):
-        self.now = datetime(2026, 10, 18, 12, 0, 0, tzinfo=timezone.utc)
+        self.now = datetime(2026, 10, 18, 12, 0, 0, tzinfo=UTC)
 
     def __call__(self):
         return self.now
@@ -118,7 +118,7 @@ def test_per_visitor_daily_limit_and_reset(client, clock):
     assert response.status_code == 429
     assert "20 questions per day" in response.json()["detail"]
 
-    clock.now = datetime(2026, 10, 19, 0, 0, 1, tzinfo=timezone.utc)  # just after midnight UTC
+    clock.now = datetime(2026, 10, 19, 0, 0, 1, tzinfo=UTC)  # just after midnight UTC
     assert ask_from(client, "203.0.113.7").status_code == 200
 
 
