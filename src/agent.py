@@ -3,7 +3,8 @@ feasibility code as tools.
 
 answer_question() runs the tool-use loop and returns the answer plus every tool call made.
 It is used by scripts/ask_blocks.py (command line) and the POST /ask endpoint in main.py.
-Reads ANTHROPIC_API_KEY from the project's .env file and the feed from data/raw/halifax.zip.
+Reads ANTHROPIC_API_KEY from the environment or the project's .env file, and the feed from
+FEED_PATH (default data/raw/halifax.zip, relative to the project root).
 """
 
 import json
@@ -20,7 +21,9 @@ from src.feasibility import fleet_feasibility
 PROJECT_ROOT = Path(__file__).parent.parent
 
 MODEL = "claude-opus-5-5"
-HALIFAX_FEED = PROJECT_ROOT / "data" / "raw" / "halifax.zip"
+# A relative FEED_PATH is taken from the project root; an absolute one is used as is.
+FEED_PATH_SETTING = os.environ.get("FEED_PATH", "data/raw/halifax.zip")
+HALIFAX_FEED = PROJECT_ROOT / FEED_PATH_SETTING
 MAX_ROUNDS = 5  # safety limit on API calls per run
 
 SYSTEM = (
@@ -177,7 +180,7 @@ def answer_question(question, log=None):
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise AgentError("ANTHROPIC_API_KEY not found: add it to .env and save the file")
     if not HALIFAX_FEED.exists():
-        raise AgentError("Halifax feed not found at data/raw/halifax.zip")
+        raise AgentError(f"Halifax feed not found at {FEED_PATH_SETTING} (set FEED_PATH)")
 
     client = anthropic.Anthropic()
     messages = [{"role": "user", "content": question}]
