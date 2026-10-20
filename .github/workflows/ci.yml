@@ -15,11 +15,11 @@ jobs:
     steps:
       # Download this repository's code onto the virtual machine.
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Install Python 3.12, the same version the Dockerfile uses.
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
