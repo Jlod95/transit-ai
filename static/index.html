@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transit AI – Electric Bus Feasibility Check</title>
+  <meta name="description" content="A first-pass check of which Halifax Transit bus blocks could run on one overnight charge.">
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --card: #ffffff;
+      --text: #1d2330;
+      --muted: #5b6475;
+      --border: #dde1e8;
+      --accent: #0f6e5f;
+      --accent-text: #ffffff;
+      --chip: #e9f3f1;
+      --error-bg: #fdf0ef;
+      --error-text: #8a2a20;
+      --note-bg: #fff8e6;
+      --note-text: #6b4e00;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #14171c;
+        --card: #1c2027;
+        --text: #e6e9ef;
+        --muted: #a2aab8;
+        --border: #313744;
+        --accent: #3fb59f;
+        --accent-text: #0d1512;
+        --chip: #1f2f2c;
+        --error-bg: #3a1f1c;
+        --error-text: #f3b4ab;
+        --note-bg: #352c14;
+        --note-text: #f0d68a;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    main { max-width: 760px; margin: 0 auto; padding: 32px 16px 48px; }
+    h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 8px; }
+    .lead { color: var(--muted); margin: 0 0 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    label { display: block; font-weight: 600; margin-bottom: 8px; }
+    textarea {
+      width: 100%;
+      min-height: 84px;
+      padding: 10px 12px;
+      font: inherit;
+      color: inherit;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      resize: vertical;
+    }
+    textarea:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .row { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+    .hint { color: var(--muted); font-size: 0.85rem; }
+    button.primary {
+      background: var(--accent);
+      color: var(--accent-text);
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 22px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.primary:disabled { opacity: 0.6; cursor: wait; }
+    .examples-title { font-weight: 600; margin: 0 0 8px; }
+    .examples { display: grid; gap: 8px; }
+    .examples button {
+      text-align: left;
+      background: var(--chip);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font: inherit;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+    .examples button:hover { border-color: var(--accent); }
+    .examples button:disabled { opacity: 0.6; cursor: wait; }
+    .loading { display: flex; align-items: center; gap: 10px; color: var(--muted); }
+    .spinner {
+      width: 18px; height: 18px; flex: none;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+    .error { background: var(--error-bg); color: var(--error-text); border-color: transparent; }
+    .question-echo { color: var(--muted); font-size: 0.9rem; margin: 0 0 8px; }
+    .answer { overflow-wrap: anywhere; }
+    .answer > :first-child { margin-top: 0; }
+    .answer > :last-child { margin-bottom: 0; }
+    .answer table { border-collapse: collapse; display: block; overflow-x: auto; }
+    .answer th, .answer td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
+    .answer code { background: var(--bg); padding: 1px 4px; border-radius: 4px; }
+    details { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
+    summary { cursor: pointer; font-weight: 600; }
+    .steps { margin: 10px 0 0; padding-left: 20px; }
+    .steps li { margin-bottom: 12px; }
+    .steps .tool { font-weight: 600; }
+    .steps dl { margin: 4px 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 0.9rem; }
+    .steps dt { color: var(--muted); }
+    .steps dd { margin: 0; }
+    pre {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin: 4px 0 0;
+      font-size: 0.82rem;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .note { background: var(--note-bg); color: var(--note-text); border-color: transparent; font-size: 0.9rem; }
+    footer { color: var(--muted); font-size: 0.85rem; margin-top: 24px; }
+    footer a { color: inherit; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Transit AI: could an electric bus run it?</h1>
+  <p class="lead">
+    A first-pass check of which Halifax Transit bus blocks could run on one overnight charge,
+    using public GTFS schedule data (valid to 29 Nov 2026) and placeholder battery assumptions.
+  </p>
+
+  <form id="ask-form" class="card">
+    <label for="question">Ask a question</label>
+    <textarea id="question" name="question" maxlength="500"
+      placeholder="e.g. How far does block 722145 drive on 14 October 2026?"></textarea>
+    <div class="row">
+      <button id="ask-button" class="primary" type="submit">Ask</button>
+      <span class="hint">Press Enter to ask · Shift+Enter for a new line</span>
+    </div>
+  </form>
+
+  <section class="card" aria-labelledby="examples-title">
+    <p id="examples-title" class="examples-title">Or try an example</p>
+    <div class="examples">
+      <button type="button">How many Halifax blocks could run on one overnight charge in winter on 14 October 2026, and which are the hardest?</button>
+      <button type="button">How far does block 722145 drive on 14 October 2026?</button>
+      <button type="button">Give me the distance and service time for block 722318 on 14 October 2026.</button>
+    </div>
+  </section>
+
+  <div id="loading" class="card loading" hidden aria-live="polite">
+    <span class="spinner" aria-hidden="true"></span>
+    <span id="loading-text">Working on it…</span>
+  </div>
+
+  <div id="error" class="card error" hidden role="alert"></div>
+
+  <section id="result" class="card" hidden aria-live="polite">
+    <p id="result-question" class="question-echo"></p>
+    <div id="answer" class="answer"></div>
+    <details id="steps-box">
+      <summary id="steps-summary">How this answer was made</summary>
+      <p class="hint">The AI model chose which tools to call. Each tool runs our own tested Python
+        code on the timetable data, and the model wrote the answer from what the tools returned.</p>
+      <ol id="steps" class="steps"></ol>
+    </details>
+  </section>
+
+  <div class="card note">
+    Battery size and energy use are placeholder assumptions, not sourced figures, and distances
+    leave out empty running to and from the garage, so results are optimistic. Treat this as a
+    first pass, not a recommendation.
+  </div>
+
+  <footer>
+    Data: Halifax Transit GTFS, under the Open Government Licence – Halifax.
+    This demo answers a limited number of questions per visitor and per day.
+    <a href="https://github.com/Jlod95/transit-ai">Source code on GitHub</a>.
+  </footer>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
+  integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+"
+  crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"
+  integrity="sha384-JEyTNhjM6R1ElGoJns4U2Ln4ofPcqzSsynQkmEc/KGy6336qAZl70tDLufbkla+3"
+  crossorigin="anonymous"></script>
+<script>
+  const form = document.getElementById("ask-form");
+  const input = document.getElementById("question");
+  const askButton = document.getElementById("ask-button");
+  const exampleButtons = document.querySelectorAll(".examples button");
+  const loading = document.getElementById("loading");
+  const loadingText = document.getElementById("loading-text");
+  const errorBox = document.getElementById("error");
+  const result = document.getElementById("result");
+
+  const TOOL_LABELS = {
+    get_block_distance: "Looked up a block's daily distance",
+    get_block_duration: "Looked up a block's time in service",
+    get_fleet_feasibility: "Checked every block against one battery charge",
+  };
+
+  // Turn the model's markdown into HTML, then strip anything that could run code.
+  function renderMarkdown(text) {
+    if (window.marked && window.DOMPurify) {
+      return DOMPurify.sanitize(marked.parse(text));
+    }
+    // If the libraries failed to load, show plain text rather than unsafe HTML.
+    const pre = document.createElement("pre");
+    pre.textContent = text;
+    return pre.outerHTML;
+  }
+
+  function setBusy(busy) {
+    askButton.disabled = busy;
+    exampleButtons.forEach((b) => (b.disabled = busy));
+  }
+
+  function showError(message) {
+    errorBox.textContent = message;
+    errorBox.hidden = false;
+  }
+
+  function friendlyError(status, detail) {
+    if (status === 400) return "Please check your question: " + (detail || "it couldn't be read.");
+    if (status === 429) return detail || "Too many questions right now. Please try again shortly.";
+    return "Something went wrong on our side. Please try again in a minute.";
+  }
+
+  // Build the "How this answer was made" list with textContent only, never as HTML.
+  function renderSteps(toolCalls, rounds) {
+    const list = document.getElementById("steps");
+    list.replaceChildren();
+    const n = toolCalls.length;
+    document.getElementById("steps-summary").textContent =
+      `How this answer was made (${n} tool call${n === 1 ? "" : "s"}, ${rounds} round${rounds === 1 ? "" : "s"})`;
+    for (const call of toolCalls) {
+      const item = document.createElement("li");
+      const title = document.createElement("div");
+      title.className = "tool";
+      title.textContent = TOOL_LABELS[call.name] || call.name;
+      const name = document.createElement("div");
+      name.className = "hint";
+      name.textContent = "Tool: " + call.name;
+      const inputs = document.createElement("dl");
+      for (const [key, value] of Object.entries(call.input || {})) {
+        const dt = document.createElement("dt");
+        dt.textContent = key;
+        const dd = document.createElement("dd");
+        dd.textContent = String(value);
+        inputs.append(dt, dd);
+      }
+      const label = document.createElement("div");
+      label.className = "hint";
+      label.textContent = "Python returned:";
+      const output = document.createElement("pre");
+      try {
+        output.textContent = JSON.stringify(JSON.parse(call.result), null, 2);
+      } catch {
+        output.textContent = call.result;
+      }
+      item.append(title, name, inputs, label, output);
+      list.append(item);
+    }
+    if (n === 0) {
+      const item = document.createElement("li");
+      item.textContent = "No tools were needed for this answer.";
+      list.append(item);
+    }
+  }
+
+  async function ask(question) {
+    question = question.trim();
+    if (!question) {
+      showError("Please type a question first, or click one of the examples.");
+      return;
+    }
+    errorBox.hidden = true;
+    result.hidden = true;
+    loading.hidden = false;
+    setBusy(true);
+    const started = Date.now();
+    const timer = setInterval(() => {
+      const seconds = Math.round((Date.now() - started) / 1000);
+      loadingText.textContent = `Working on it… ${seconds}s (answers usually take 10–30 seconds)`;
+    }, 1000);
+    loadingText.textContent = "Working on it… (answers usually take 10–30 seconds)";
+
+    try {
+      const response = await fetch("/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
+      });
+      let data = null;
+      try { data = await response.json(); } catch { /* not JSON */ }
+      if (!response.ok) {
+        const detail = data && typeof data.detail === "string" ? data.detail : "";
+        showError(friendlyError(response.status, detail));
+        return;
+      }
+      document.getElementById("result-question").textContent = "Q: " + question;
+      document.getElementById("answer").innerHTML = renderMarkdown(data.answer || "");
+      renderSteps(data.tool_calls || [], data.rounds || 0);
+      document.getElementById("steps-box").open = false;
+      result.hidden = false;
+      result.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch {
+      showError("Couldn't reach the server. Check your connection and try again.");
+    } finally {
+      clearInterval(timer);
+      loading.hidden = true;
+      setBusy(false);
+    }
+  }
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    ask(input.value);
+  });
+
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      form.requestSubmit();
+    }
+  });
+
+  exampleButtons.forEach((button) =>
+    button.addEventListener("click", () => {
+      input.value = button.textContent.trim();
+      ask(input.value);
+    })
+  );
+</script>
+</body>
+</html>

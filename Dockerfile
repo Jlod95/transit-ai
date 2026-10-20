@@ -15,6 +15,7 @@ assert zipfile.ZipFile('data/raw/halifax.zip').testzip() is None" "$FEED_URL"
 COPY main.py .
 COPY src/ src/
 COPY config/ config/
+COPY static/ static/
 
 # Create an unprivileged user and run the app as that user instead of root.
 RUN useradd --create-home --uid 1000 appuser

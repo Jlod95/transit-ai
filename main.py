@@ -1,15 +1,18 @@
 import logging
 import os
 import time
+from pathlib import Path
 
 import anthropic
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from src.agent import AgentError, answer_question
 from src.rate_limit import QuestionLimiter, RateLimitExceeded
 
 MAX_QUESTION_LENGTH = 500
+INDEX_PAGE = Path(__file__).parent / "static" / "index.html"
 
 app = FastAPI(title="Transit AI")
 limiter = QuestionLimiter(global_daily_cap=int(os.environ.get("DAILY_QUESTION_CAP", "100")))
@@ -41,6 +44,12 @@ def client_ip(request: Request) -> str:
     if forwarded:
         return forwarded.split(",")[-1].strip()
     return request.client.host if request.client else "unknown"
+
+
+@app.get("/", include_in_schema=False)
+def index():
+    """The demo page: a question box that calls /ask and shows the answer."""
+    return FileResponse(INDEX_PAGE)
 
 
 @app.get("/health")
