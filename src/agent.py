@@ -3,8 +3,10 @@ feasibility code as tools.
 
 answer_question() runs the tool-use loop and returns the answer plus every tool call made.
 It is used by scripts/ask_blocks.py (command line) and the POST /ask endpoint in main.py.
-Reads ANTHROPIC_API_KEY from the environment or the project's .env file, and the feed from
-FEED_PATH (default data/raw/halifax.zip, relative to the project root).
+Reads ANTHROPIC_API_KEY from the environment or the project's .env file. Block figures come
+from the pre-built summary at SUMMARY_PATH (default data/summaries/halifax.json) when it exists,
+otherwise straight from the feed at FEED_PATH (default data/raw/halifax.zip). Both paths are
+relative to the project root unless absolute.
 """
 
 import json
@@ -15,8 +17,14 @@ from pathlib import Path
 import anthropic
 from dotenv import load_dotenv
 
-from src.blocks import MissingDistanceError, daily_block_distance, daily_block_duration
-from src.feasibility import fleet_feasibility
+from src.blocks import (
+    BlockCoverageError,
+    MissingDistanceError,
+    daily_block_distance,
+    daily_block_duration,
+)
+from src.feasibility import assess_distances, range_km_for
+from src.summaries import design_day, load_summary, service_day_for
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -24,6 +32,7 @@ MODEL = "claude-opus-5-5"
 # A relative FEED_PATH is taken from the project root; an absolute one is used as is.
 FEED_PATH_SETTING = os.environ.get("FEED_PATH", "data/raw/halifax.zip")
 HALIFAX_FEED = PROJECT_ROOT / FEED_PATH_SETTING
+SUMMARY_FILE = PROJECT_ROOT / os.environ.get("SUMMARY_PATH", "data/summaries/halifax.json")
 MAX_ROUNDS = 5  # safety limit on API calls per run
 
 SYSTEM = (
@@ -31,7 +40,8 @@ SYSTEM = (
     "Use the tools for block distances and service times rather than guessing. "
     "For battery size, energy use and range, use only the numbers returned by "
     "get_fleet_feasibility, not your own estimates, and say clearly that these are "
-    "placeholder assumptions that have not yet been sourced."
+    "placeholder assumptions that have not yet been sourced. When a tool result includes a "
+    "data_snapshot, mention which feed version the figures come from."
 )
 
 # The two single-block tools take the same inputs.
@@ -87,7 +97,8 @@ TOOLS = [
             "margin for delays and cold. Battery size and kWh per km are placeholders, not yet "
             "sourced. Assumes one "
             "overnight charge and no daytime charging; uses revenue km only, so it is optimistic. "
-            "For one specific block, use get_block_distance or get_block_duration instead."
+            "For one specific block, use get_block_distance or get_block_duration instead. "
+            "For the worst day in the whole timetable, use get_design_day."
         ),
         "input_schema": {
             "type": "object",
@@ -104,6 +115,32 @@ TOOLS = [
         },
         "strict": True,
     },
+    {
+        "name": "get_design_day",
+        "description": (
+            "DESIGN DAY: finds the single hardest service day in the whole timetable for "
+            "battery-electric buses in a season, i.e. the day a fleet plan must be able to "
+            "cover. It is the day pattern with the most blocks over one charge's range; ties "
+            "go to the pattern with the most blocks in service. Use for questions about the "
+            "worst-case day, which day to plan around, or the hardest day overall when no date "
+            "is given. Returns the dates sharing that pattern, the same fleet figures as "
+            "get_fleet_feasibility for that day, and the data snapshot. For a specific date, "
+            "use get_fleet_feasibility instead."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "season": {
+                    "type": "string",
+                    "enum": ["summer", "winter"],
+                    "description": "Season for energy use; winter uses more (heating)",
+                },
+            },
+            "required": ["season"],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
 ]
 
 
@@ -116,31 +153,100 @@ def lookup_block(block_values, block_id, date_text):
     return block_values[block_id], None
 
 
+def snapshot(summary):
+    """The part of the summary's stamp worth showing to the model."""
+    stamp = summary["stamp"]
+    return {
+        "feed_version": stamp["feed_version"],
+        "feed_sha256": stamp["feed_sha256"][:12],
+        "timetable_covers": f"{stamp['calendar_start']} to {stamp['calendar_end']}",
+        "summary_built": stamp["built_at"],
+    }
+
+
+def blocks_on(date_text, field):
+    """{block_id: km or minutes} for one date, from the summary if built, else from the feed.
+
+    Returns (values, message). With a summary, message explains an empty result, telling
+    "no service that day" apart from "date outside the timetable".
+    """
+    service_date = date.fromisoformat(date_text)
+    summary = load_summary(SUMMARY_FILE)
+    if summary is None:
+        compute = daily_block_distance if field == "km" else daily_block_duration
+        return compute(HALIFAX_FEED, service_date), None
+    group = service_day_for(summary, service_date)
+    if group is not None:
+        return {b: v[field] for b, v in group["blocks"].items()}, None
+    stamp = summary["stamp"]
+    if stamp["calendar_start"] <= date_text <= stamp["calendar_end"]:
+        return {}, f"No Halifax Transit bus service runs on {date_text}."
+    return {}, (
+        f"{date_text} is outside the timetable, which covers {stamp['calendar_start']} "
+        f"to {stamp['calendar_end']}."
+    )
+
+
 def get_block_distance(block_id, date_text):
     """Run our tested code and return a short text result for Claude."""
-    distances = daily_block_distance(HALIFAX_FEED, date.fromisoformat(date_text))
-    km, message = lookup_block(distances, block_id, date_text)
+    distances, message = blocks_on(date_text, "km")
     if message:
         return message
+    km, not_running = lookup_block(distances, block_id, date_text)
+    if not_running:
+        return not_running
     return f"Block {block_id} drives {km:.1f} revenue km on {date_text}."
 
 
 def get_block_duration(block_id, date_text):
     """Run our tested code and return a short text result for Claude."""
-    durations = daily_block_duration(HALIFAX_FEED, date.fromisoformat(date_text))
-    minutes, message = lookup_block(durations, block_id, date_text)
+    durations, message = blocks_on(date_text, "minutes")
     if message:
         return message
+    minutes, not_running = lookup_block(durations, block_id, date_text)
+    if not_running:
+        return not_running
     hours, mins = divmod(round(minutes), 60)
     return f"Block {block_id} is in service for {hours} h {mins} min on {date_text}."
 
 
 def get_fleet_feasibility(date_text, season):
-    """Run the fleet check and return its summary as JSON text for Claude."""
-    result = fleet_feasibility(HALIFAX_FEED, date.fromisoformat(date_text), season)
-    if result["total_blocks"] == 0:
+    """Run the fleet check and return its result as JSON text for Claude."""
+    range_km_for(season)  # rejects an unknown season before any work
+    distances, message = blocks_on(date_text, "km")
+    if message:
+        return message
+    if not distances:
         return f"No bus service in the feed on {date_text}; the feed may not cover that date."
+    result = {"service_date": date_text, **assess_distances(distances, season)}
+    summary = load_summary(SUMMARY_FILE)
+    if summary is not None:
+        result["data_snapshot"] = snapshot(summary)
     return json.dumps(result)
+
+
+def get_design_day(season):
+    """Pick the hardest service day from the summary for this season's range."""
+    summary = load_summary(SUMMARY_FILE)
+    if summary is None:
+        return "No pre-built summary is available, so the design day can't be chosen."
+    range_km, _ = range_km_for(season)
+    group, over = design_day(summary, range_km)
+    if group is None:
+        return "The summary contains no bus service."
+    distances = {b: v["km"] for b, v in group["blocks"].items()}
+    dates = group["dates"]
+    return json.dumps(
+        {
+            "design_day": dates[0],
+            "same_pattern_dates": len(dates),
+            "same_pattern_examples": dates[:10],
+            "rule": "most blocks over range, then most blocks in service, then earliest date",
+            "blocks_over_range": over,
+            **assess_distances(distances, season),
+            "data_snapshot": snapshot(summary),
+        }
+    )
 
 
 # Each tool name, and how to call its Python function with Claude's inputs.
@@ -148,6 +254,7 @@ TOOL_FUNCTIONS = {
     "get_block_distance": lambda i: get_block_distance(i["block_id"], i["date"]),
     "get_block_duration": lambda i: get_block_duration(i["block_id"], i["date"]),
     "get_fleet_feasibility": lambda i: get_fleet_feasibility(i["date"], i["season"]),
+    "get_design_day": lambda i: get_design_day(i["season"]),
 }
 
 
@@ -157,7 +264,7 @@ def run_tool(name, tool_input):
         return f"Unknown tool: {name}", True
     try:
         return TOOL_FUNCTIONS[name](tool_input), False
-    except MissingDistanceError as e:
+    except (MissingDistanceError, BlockCoverageError) as e:
         return f"Feed data problem: {e}", True
     except ValueError as e:
         return f"Invalid input: {e}", True
@@ -165,6 +272,16 @@ def run_tool(name, tool_input):
 
 class AgentError(Exception):
     """The agent could not produce an answer: missing setup, a refusal, or no final answer."""
+
+
+def check_block_data():
+    """Raise AgentError unless the tools have data: the pre-built summary (used in the deployed
+    container, which holds no raw feed) or, for local development, the raw feed."""
+    if load_summary(SUMMARY_FILE) is None and not HALIFAX_FEED.exists():
+        raise AgentError(
+            f"No block data: neither the summary {SUMMARY_FILE.name} nor the raw feed "
+            f"{FEED_PATH_SETTING} was found (build one with scripts/build_summaries.py)"
+        )
 
 
 def answer_question(question, log=None):
@@ -179,8 +296,7 @@ def answer_question(question, log=None):
     load_dotenv(PROJECT_ROOT / ".env")
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise AgentError("ANTHROPIC_API_KEY not found: add it to .env and save the file")
-    if not HALIFAX_FEED.exists():
-        raise AgentError(f"Halifax feed not found at {FEED_PATH_SETTING} (set FEED_PATH)")
+    check_block_data()
 
     client = anthropic.Anthropic()
     messages = [{"role": "user", "content": question}]
