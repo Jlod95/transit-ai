@@ -1,0 +1,2 @@
+# Keep summaries byte-identical on every OS (they are copied into the Docker image as-is).
+data/summaries/*.json text eol=lf
