@@ -1,22 +1,10 @@
-import zipfile
 from datetime import date
-from pathlib import Path
 
 import pytest
 
 from src.feasibility import fleet_feasibility
 
-MINI_FEED_DIR = Path(__file__).parent / "fixtures" / "mini_feed"
 WEEKDAY = date(2026, 10, 14)
-
-
-@pytest.fixture
-def mini_feed(tmp_path):
-    zip_path = tmp_path / "mini_feed.zip"
-    with zipfile.ZipFile(zip_path, "w") as zf:
-        for txt in MINI_FEED_DIR.glob("*.txt"):
-            zf.write(txt, arcname=txt.name)
-    return zip_path
 
 
 def test_one_block_fits_one_does_not(mini_feed):

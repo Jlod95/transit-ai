@@ -1,12 +1,11 @@
-import csv
-import io
-import zipfile
 from datetime import date
 from pathlib import Path
 
 import pytest
+from conftest import zip_mini_feed
 
 from src.blocks import (
+    BlockCoverageError,
     MissingDistanceError,
     daily_block_distance,
     daily_block_duration,
@@ -14,41 +13,60 @@ from src.blocks import (
 )
 
 HALIFAX_FEED = Path(__file__).parent.parent / "data" / "raw" / "halifax.zip"
-MINI_FEED_DIR = Path(__file__).parent / "fixtures" / "mini_feed"
 
 # The feed is gitignored, so it isn't available in CI; skip there instead of failing.
 needs_halifax = pytest.mark.skipif(not HALIFAX_FEED.exists(), reason="data/raw/halifax.zip missing")
 
 
 @pytest.fixture
-def mini_feed(tmp_path):
-    """Zip the hand-made fixture feed into pytest's temporary folder and return the zip path."""
-    zip_path = tmp_path / "mini_feed.zip"
-    with zipfile.ZipFile(zip_path, "w") as zf:
-        for txt in MINI_FEED_DIR.glob("*.txt"):
-            zf.write(txt, arcname=txt.name)
-    return zip_path
-
-
-@pytest.fixture
 def mini_feed_missing_t4(tmp_path):
     """The mini feed with every shape_dist_traveled for bus trip T4 (block B) blanked."""
-    zip_path = tmp_path / "mini_feed_missing_t4.zip"
-    with zipfile.ZipFile(zip_path, "w") as zf:
-        for txt in MINI_FEED_DIR.glob("*.txt"):
-            if txt.name != "stop_times.txt":
-                zf.write(txt, arcname=txt.name)
-                continue
-            rows = list(csv.DictReader(txt.open(newline="")))
+
+    def blank_t4(name, rows):
+        if name == "stop_times.txt":
             for row in rows:
                 if row["trip_id"] == "T4":
                     row["shape_dist_traveled"] = ""
-            out = io.StringIO()
-            writer = csv.DictWriter(out, fieldnames=rows[0].keys())
-            writer.writeheader()
-            writer.writerows(rows)
-            zf.writestr("stop_times.txt", out.getvalue())
-    return zip_path
+        return rows
+
+    return zip_mini_feed(tmp_path / "mini_feed_missing_t4.zip", blank_t4)
+
+
+@pytest.fixture
+def mini_feed_with_rail(tmp_path):
+    """The mini feed plus a weekday rail route (route_type 1) whose one trip is block D."""
+
+    def add_rail(name, rows):
+        if name == "routes.txt":
+            rows.append({"route_id": "RAIL", "agency_id": "MINI", "route_short_name": "L1",
+                         "route_long_name": "Test Rail Line", "route_type": "1"})
+        if name == "trips.txt":
+            rows.append({"route_id": "RAIL", "service_id": "WEEKDAY", "trip_id": "RT1",
+                         "block_id": "D"})
+        if name == "stop_times.txt":
+            rows += [
+                {"trip_id": "RT1", "arrival_time": "11:00:00", "departure_time": "11:00:00",
+                 "stop_id": "S1", "stop_sequence": "1", "shape_dist_traveled": ""},
+                {"trip_id": "RT1", "arrival_time": "11:30:00", "departure_time": "11:30:00",
+                 "stop_id": "S3", "stop_sequence": "2", "shape_dist_traveled": "50"},
+            ]
+        return rows
+
+    return zip_mini_feed(tmp_path / "mini_feed_with_rail.zip", add_rail)
+
+
+@pytest.fixture
+def mini_feed_t5_without_block(tmp_path):
+    """The mini feed with bus trip T5's block_id removed: 4 of 5 bus trips keep a block."""
+
+    def drop_block(name, rows):
+        if name == "trips.txt":
+            for row in rows:
+                if row["trip_id"] == "T5":
+                    row["block_id"] = ""
+        return rows
+
+    return zip_mini_feed(tmp_path / "mini_feed_t5_without_block.zip", drop_block)
 
 
 def test_mini_feed_weekday_totals(mini_feed):
@@ -66,6 +84,23 @@ def test_mini_feed_excludes_ferry(mini_feed):
 def test_mini_feed_exception_date_has_no_blocks(mini_feed):
     # calendar_dates.txt removes the WEEKDAY service on Monday 12 Oct 2026.
     assert daily_block_distance(mini_feed, date(2026, 10, 12)) == {}
+
+
+def test_rail_route_is_not_counted_as_a_bus(mini_feed_with_rail):
+    # Block D is a rail trip (route_type 1) on the same weekday service as the buses.
+    distances = daily_block_distance(mini_feed_with_rail, date(2026, 10, 14))
+    assert distances == pytest.approx({"A": 25.0, "B": 30.0})
+    assert "D" not in daily_block_duration(mini_feed_with_rail, date(2026, 10, 14))
+
+
+def test_low_block_coverage_raises(mini_feed_t5_without_block):
+    # 4 of the 5 weekday bus trips have a block_id: 80%, below the 95% minimum. Without the
+    # guard, T5's 15 km would silently vanish and block B would read 15 km instead of 30.
+    with pytest.raises(BlockCoverageError) as error:
+        daily_block_distance(mini_feed_t5_without_block, date(2026, 10, 14))
+    assert error.value.with_block == 4
+    assert error.value.total == 5
+    assert "80.0%" in str(error.value)
 
 
 def test_trip_without_distances_raises(mini_feed_missing_t4):
