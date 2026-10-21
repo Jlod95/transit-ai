@@ -111,7 +111,8 @@ az monitor log-analytics workspace create --resource-group $RG --workspace-name 
 ## 6. Build and push the image
 
 Commit your changes first, then tag the image with the commit ID so you can always tell which
-code is live. The Dockerfile downloads the Halifax GTFS feed during the build.
+code is live. The image holds no raw GTFS feed: it copies the committed summary
+`data/summaries/halifax.json`, which every tool answers from (see section 12 for updating it).
 
 ```powershell
 $TAG = git rev-parse --short HEAD
@@ -249,8 +250,22 @@ docker push "$ACR.azurecr.io/transit-ai:$TAG"
 az containerapp update --name $APP --resource-group $RG --image "$ACR.azurecr.io/transit-ai:$TAG"
 ```
 
-To fetch a newer Halifax feed, add `--no-cache` to `docker build` (Docker otherwise reuses the
-feed it downloaded last time). The current feed is valid to 29 Nov 2026.
+### Updating the timetable data
+
+The current feed is valid to 29 Nov 2026. To move to a newer one, download it, rebuild the
+summary locally, check it, and commit it; then deploy as above. The summary's stamp records
+the new feed's SHA-256 hash and the code commit that built it.
+
+```powershell
+curl.exe -L -o data/raw/halifax.zip http://gtfs.halifax.ca/static/google_transit.zip
+.venv\Scripts\python.exe scripts/build_summaries.py data/raw/halifax.zip halifax
+.venv\Scripts\python.exe -m pytest
+git add data/summaries/halifax.json
+git commit -m "Rebuild Halifax summary from new feed"
+```
+
+Commit any code changes before rebuilding, so the stamp names a clean commit rather than
+one marked "-dirty".
 
 ## 13. Budget alert (free)
 

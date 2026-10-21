@@ -3,19 +3,15 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Download the Halifax Transit GTFS feed into the image at build time, so the image works
-# without any local data. Docker caches this step: rebuild with --no-cache (or a different
-# FEED_URL) to fetch a newer feed. The build fails if the download isn't a valid zip.
-ARG FEED_URL=http://gtfs.halifax.ca/static/google_transit.zip
-RUN mkdir -p data/raw && python -c "\
-import sys, urllib.request, zipfile; \
-urllib.request.urlretrieve(sys.argv[1], 'data/raw/halifax.zip'); \
-assert zipfile.ZipFile('data/raw/halifax.zip').testzip() is None" "$FEED_URL"
-
 COPY main.py .
 COPY src/ src/
 COPY config/ config/
 COPY static/ static/
+
+# Pre-computed block distances and durations, built locally with scripts/build_summaries.py
+# and committed to git. The image holds no raw GTFS feed: every tool answers from this file,
+# and its stamp records exactly which feed and code produced it.
+COPY data/summaries/ data/summaries/
 
 # Create an unprivileged user and run the app as that user instead of root.
 RUN useradd --create-home --uid 1000 appuser

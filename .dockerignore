@@ -2,5 +2,5 @@
 .venv
 .git
 __pycache__
-data
+data/raw
 tests
