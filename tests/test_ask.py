@@ -44,14 +44,18 @@ def client(monkeypatch, clock):
     """A test client with a fake agent (no API calls) and a fresh limiter on the fake clock."""
     calls = []
 
-    def fake_answer_question(question):
+    agencies = []
+
+    def fake_answer_question(question, agency="halifax"):
         calls.append(question)
+        agencies.append(agency)
         return FAKE_RESULT
 
     monkeypatch.setattr(main, "answer_question", fake_answer_question)
     monkeypatch.setattr(main, "limiter", QuestionLimiter(global_daily_cap=100, clock=clock))
     test_client = TestClient(main.app)
     test_client.fake_calls = calls
+    test_client.fake_agencies = agencies
     return test_client
 
 
@@ -162,3 +166,16 @@ def test_rate_limited_request_is_logged(client, caplog):
         ask_from(client, "203.0.113.7")
     lines = [r.getMessage() for r in caplog.records if r.name == "transit_ai.ask"]
     assert lines[-1] == "/ask status=429 rounds=- rate_limited=yes"
+
+
+def test_agency_is_passed_to_the_agent(client):
+    assert client.post("/ask", json=QUESTION).status_code == 200  # no agency: Halifax
+    assert client.post("/ask", json={**QUESTION, "agency": "dublin"}).status_code == 200
+    assert client.fake_agencies == ["halifax", "dublin"]
+
+
+def test_unknown_agency_is_rejected(client):
+    response = client.post("/ask", json={**QUESTION, "agency": "paris"})
+    assert response.status_code == 400
+    assert "Unknown agency" in response.json()["detail"]
+    assert client.fake_calls == []

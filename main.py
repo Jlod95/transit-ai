@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from src.agencies import AGENCIES, DEFAULT_AGENCY
 from src.agent import AgentError, answer_question
 from src.rate_limit import QuestionLimiter, RateLimitExceeded
 
@@ -30,6 +31,7 @@ if not logger.handlers:
 
 class AskRequest(BaseModel):
     question: str
+    agency: str = DEFAULT_AGENCY
 
 
 def client_ip(request: Request) -> str:
@@ -73,6 +75,11 @@ def ask(body: AskRequest, request: Request):
                 detail=f"Question must be {MAX_QUESTION_LENGTH} characters or fewer "
                 f"(got {len(question)}).",
             )
+        if body.agency not in AGENCIES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown agency {body.agency!r}; choose one of {', '.join(sorted(AGENCIES))}.",
+            )
 
         try:
             limiter.check_and_record(client_ip(request))
@@ -85,7 +92,7 @@ def ask(body: AskRequest, request: Request):
             )
 
         try:
-            result = answer_question(question)
+            result = answer_question(question, body.agency)
         except AgentError as e:
             raise HTTPException(status_code=500, detail=f"The agent could not answer: {e}")
         except anthropic.APIError:

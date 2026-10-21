@@ -258,9 +258,9 @@ the new feed's SHA-256 hash and the code commit that built it.
 
 ```powershell
 curl.exe -L -o data/raw/halifax.zip http://gtfs.halifax.ca/static/google_transit.zip
-.venv\Scripts\python.exe scripts/build_summaries.py data/raw/halifax.zip halifax
+.venv\Scripts\python.exe scripts/build_summaries.py halifax
 .venv\Scripts\python.exe -m pytest
-git add data/summaries/halifax.json
+git add data/summaries/
 git commit -m "Rebuild Halifax summary from new feed"
 ```
 

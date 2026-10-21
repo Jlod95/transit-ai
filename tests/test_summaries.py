@@ -38,9 +38,14 @@ def test_one_service_day_with_both_blocks(summary):
 def test_stamp(summary, mini_feed):
     stamp = summary["stamp"]
     assert stamp["agency"] == "mini"
-    assert stamp["feed_file"] == "mini_feed.zip"
-    assert stamp["feed_sha256"] == hashlib.sha256(mini_feed.read_bytes()).hexdigest()
-    assert stamp["feed_version"] is None  # the mini feed has no feed_info.txt
+    assert stamp["feeds"] == [{
+        "file": "mini_feed.zip",
+        "sha256": hashlib.sha256(mini_feed.read_bytes()).hexdigest(),
+        "version": None,  # the mini feed has no feed_info.txt
+    }]
+    assert stamp["distance_method"].startswith("exact")
+    assert stamp["block_method"].startswith("published")
+    assert stamp["dates_built"] == "whole timetable"
     assert stamp["calendar_start"] == "2026-01-01"
     assert stamp["calendar_end"] == "2026-12-31"
     assert stamp["built_at"] == "2026-10-21T12:00:00Z"
@@ -57,8 +62,8 @@ def test_hash_changes_when_the_data_changes_even_if_the_label_does_not(tmp_path,
         return rows
 
     changed = build_summary(zip_mini_feed(tmp_path / "changed.zip", lengthen_t1), "mini")
-    assert changed["stamp"]["feed_version"] == summary["stamp"]["feed_version"]
-    assert changed["stamp"]["feed_sha256"] != summary["stamp"]["feed_sha256"]
+    assert changed["stamp"]["feeds"][0]["version"] == summary["stamp"]["feeds"][0]["version"]
+    assert changed["stamp"]["feeds"][0]["sha256"] != summary["stamp"]["feeds"][0]["sha256"]
     assert changed["service_days"][0]["blocks"]["A"]["km"] == 27.0
 
 
@@ -95,10 +100,12 @@ def test_design_day_rule():
 
 
 @pytest.fixture
-def agent_using_summary(monkeypatch, tmp_path, summary):
-    """Point the agent at a built mini summary and at a feed path that doesn't exist, so any
-    result can only have come from the summary."""
-    monkeypatch.setattr(agent, "SUMMARY_FILE", write_summary(summary, tmp_path))
+def agent_using_summary(monkeypatch, tmp_path, mini_feed):
+    """Point the agent at a mini summary saved as Halifax's, and at a raw feed path that doesn't
+    exist, so any result can only have come from the summary."""
+    halifax = build_summary(mini_feed, "halifax", agency_name="Halifax Transit", now=BUILT_AT)
+    write_summary(halifax, tmp_path)
+    monkeypatch.setattr(agent, "SUMMARY_DIR", tmp_path)
     monkeypatch.setattr(agent, "HALIFAX_FEED", tmp_path / "no_such_feed.zip")
     return agent
 
@@ -111,8 +118,13 @@ def test_tools_read_the_summary(agent_using_summary):
         "Block B is in service for 1 h 45 min on 2026-10-14.", False)
     assert run("get_block_distance", {"block_id": "A", "date": "2026-10-17"})[0] == (
         "No Halifax Transit bus service runs on 2026-10-17.")
-    assert "outside the timetable" in run(
+    assert "outside the dates available" in run(
         "get_block_distance", {"block_id": "A", "date": "2027-01-05"})[0]
+    # The agency can be named explicitly; an unknown one is reported back to the model.
+    assert run("get_block_distance", {"agency": "halifax", "block_id": "A", "date": "2026-10-14"})[0] == (
+        "Block A drives 25.0 revenue km on 2026-10-14.")
+    assert run("get_block_distance", {"agency": "paris", "block_id": "A", "date": "2026-10-14"}) == (
+        "Invalid input: Unknown agency 'paris'; expected one of ['dublin', 'halifax', 'london']", True)
 
     fleet = json.loads(run("get_fleet_feasibility", {"date": "2026-10-14", "season": "winter"})[0])
     assert fleet["total_blocks"] == 2 and fleet["within_range"] == 2  # range 180 km
@@ -131,7 +143,7 @@ def test_summary_alone_is_enough_data(agent_using_summary):
 
 
 def test_no_summary_and_no_feed_is_an_error(monkeypatch, tmp_path):
-    monkeypatch.setattr(agent, "SUMMARY_FILE", tmp_path / "no_summary.json")
+    monkeypatch.setattr(agent, "SUMMARY_DIR", tmp_path)
     monkeypatch.setattr(agent, "HALIFAX_FEED", tmp_path / "no_feed.zip")
     with pytest.raises(agent.AgentError, match="No block data"):
         agent.check_block_data()

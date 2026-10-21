@@ -4,9 +4,9 @@ feasibility code as tools.
 answer_question() runs the tool-use loop and returns the answer plus every tool call made.
 It is used by scripts/ask_blocks.py (command line) and the POST /ask endpoint in main.py.
 Reads ANTHROPIC_API_KEY from the environment or the project's .env file. Block figures come
-from the pre-built summary at SUMMARY_PATH (default data/summaries/halifax.json) when it exists,
-otherwise straight from the feed at FEED_PATH (default data/raw/halifax.zip). Both paths are
-relative to the project root unless absolute.
+from each agency's pre-built summary in SUMMARY_DIR (default data/summaries). For local
+development only, Halifax falls back to its raw feed at FEED_PATH (default
+data/raw/halifax.zip) when no summary exists. Paths are relative to the project root.
 """
 
 import json
@@ -17,6 +17,7 @@ from pathlib import Path
 import anthropic
 from dotenv import load_dotenv
 
+from src.agencies import AGENCIES, DEFAULT_AGENCY, get_agency
 from src.blocks import (
     BlockCoverageError,
     MissingDistanceError,
@@ -29,30 +30,51 @@ from src.summaries import design_day, load_summary, service_day_for
 PROJECT_ROOT = Path(__file__).parent.parent
 
 MODEL = "claude-opus-5-5"
+SUMMARY_DIR = PROJECT_ROOT / os.environ.get("SUMMARY_DIR", "data/summaries")
 # A relative FEED_PATH is taken from the project root; an absolute one is used as is.
 FEED_PATH_SETTING = os.environ.get("FEED_PATH", "data/raw/halifax.zip")
 HALIFAX_FEED = PROJECT_ROOT / FEED_PATH_SETTING
-SUMMARY_FILE = PROJECT_ROOT / os.environ.get("SUMMARY_PATH", "data/summaries/halifax.json")
 MAX_ROUNDS = 5  # safety limit on API calls per run
 
-SYSTEM = (
-    "You help assess whether Halifax Transit bus blocks could be run by battery-electric buses. "
-    "Use the tools for block distances and service times rather than guessing. "
-    "For battery size, energy use and range, use only the numbers returned by "
-    "get_fleet_feasibility, not your own estimates, and say clearly that these are "
-    "placeholder assumptions that have not yet been sourced. When a tool result includes a "
-    "data_snapshot, mention which feed version the figures come from."
-)
+
+def system_prompt(agency_key):
+    agency = get_agency(agency_key)
+    return (
+        f"You help assess whether {agency.name} bus blocks could be run by battery-electric "
+        f"buses. The selected agency is {agency.name}: pass agency=\"{agency.key}\" to every "
+        "tool. Use the tools for block distances and service times rather than guessing. "
+        "For battery size, energy use and range, use only the numbers returned by "
+        "get_fleet_feasibility or get_design_day, not your own estimates, and say clearly that "
+        "these are placeholder assumptions that have not yet been sourced. When a tool result "
+        "says distances are ESTIMATED or blocks are INFERRED, say so plainly in your answer and "
+        "treat those figures as approximate. When a result includes a data_snapshot, mention "
+        "which feed version the figures come from."
+        + (f" Note: {agency.note}" if agency.note else "")
+    )
+
+
+AGENCY_PROPERTY = {
+    "type": "string",
+    "enum": sorted(AGENCIES),
+    "description": "Agency key: use the selected agency named in the system prompt",
+}
 
 # The two single-block tools take the same inputs.
 BLOCK_INPUT_SCHEMA = {
     "type": "object",
     "properties": {
-        "block_id": {"type": "string", "description": "GTFS block_id, e.g. '722145'"},
+        "agency": AGENCY_PROPERTY,
+        "block_id": {"type": "string", "description": "Block id, e.g. '722145' or '25-3'"},
         "date": {"type": "string", "description": "Service date as YYYY-MM-DD"},
     },
-    "required": ["block_id", "date"],
+    "required": ["agency", "block_id", "date"],
     "additionalProperties": False,
+}
+
+SEASON_PROPERTY = {
+    "type": "string",
+    "enum": ["summer", "winter"],
+    "description": "Season for energy use; winter uses more (heating)",
 }
 
 # What Claude is told about each tool: its name, what it does, and the inputs it takes.
@@ -61,10 +83,11 @@ TOOLS = [
     {
         "name": "get_block_distance",
         "description": (
-            "DISTANCE: how many kilometres one Halifax Transit bus block drives on a given "
-            "service date, from the GTFS schedule. Use for questions about how far a bus "
+            "DISTANCE: how many kilometres one bus block of the selected agency drives on a "
+            "given service date, from the timetable. Use for questions about how far a bus "
             "travels, mileage, or range/battery needs. Returns revenue km only (trips carrying "
-            "passengers); empty running to/from the garage (deadhead) is not included. "
+            "passengers); empty running to/from the garage (deadhead) is not included. The "
+            "result says if the distance is estimated or the block inferred. "
             "Does not give times; use get_block_duration for how long the bus is in service."
         ),
         "input_schema": BLOCK_INPUT_SCHEMA,
@@ -73,8 +96,8 @@ TOOLS = [
     {
         "name": "get_block_duration",
         "description": (
-            "TIME IN SERVICE: how long one Halifax Transit bus block is in service on a given "
-            "service date, from the first trip's first departure to the last trip's last "
+            "TIME IN SERVICE: how long one bus block of the selected agency is in service on a "
+            "given service date, from the first trip's first departure to the last trip's last "
             "arrival, in hours and minutes. Use for questions about how long a bus is out, "
             "its working day, start/end span, or time available for charging. Includes layovers "
             "between trips; excludes garage pull-out/pull-in. Does not give distance; use "
@@ -86,31 +109,28 @@ TOOLS = [
     {
         "name": "get_fleet_feasibility",
         "description": (
-            "WHOLE FLEET ON ONE CHARGE: for every Halifax Transit bus block on a service date, "
-            "checks whether its daily distance fits within one full battery charge in the given "
-            "season. Use for fleet-wide questions such as how many or what share of blocks an "
-            "electric bus could run, or which blocks are hardest. Returns the range used (km), "
-            "block counts within/over range, % within range, the 5 longest blocks with km, and "
-            "the assumptions. Range = nominal battery kWh x usable fraction / kWh per km. Only "
-            "80% of the nominal battery is counted as usable: industry practice keeps a 20% "
-            "reserve, since routinely discharging below it speeds up battery wear and leaves no "
-            "margin for delays and cold. Battery size and kWh per km are placeholders, not yet "
-            "sourced. Assumes one "
+            "WHOLE FLEET ON ONE CHARGE: for every bus block of the selected agency on a service "
+            "date, checks whether its daily distance fits within one full battery charge in the "
+            "given season. Use for fleet-wide questions such as how many or what share of blocks "
+            "an electric bus could run, or which blocks are hardest. Returns the range used (km), "
+            "block counts within/over range, % within range, the 5 longest blocks with km, the "
+            "assumptions, and a data_snapshot saying how distances and blocks were obtained. "
+            "Range = nominal battery kWh x usable fraction / kWh per km. Only 80% of the nominal "
+            "battery is counted as usable: industry practice keeps a 20% reserve, since routinely "
+            "discharging below it speeds up battery wear and leaves no margin for delays and "
+            "cold. Battery size and kWh per km are placeholders, not yet sourced. Assumes one "
             "overnight charge and no daytime charging; uses revenue km only, so it is optimistic. "
             "For one specific block, use get_block_distance or get_block_duration instead. "
-            "For the worst day in the whole timetable, use get_design_day."
+            "For the worst day in the timetable, use get_design_day."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
+                "agency": AGENCY_PROPERTY,
                 "date": {"type": "string", "description": "Service date as YYYY-MM-DD"},
-                "season": {
-                    "type": "string",
-                    "enum": ["summer", "winter"],
-                    "description": "Season for energy use; winter uses more (heating)",
-                },
+                "season": SEASON_PROPERTY,
             },
-            "required": ["date", "season"],
+            "required": ["agency", "date", "season"],
             "additionalProperties": False,
         },
         "strict": True,
@@ -118,10 +138,10 @@ TOOLS = [
     {
         "name": "get_design_day",
         "description": (
-            "DESIGN DAY: finds the single hardest service day in the whole timetable for "
-            "battery-electric buses in a season, i.e. the day a fleet plan must be able to "
-            "cover. It is the day pattern with the most blocks over one charge's range; ties "
-            "go to the pattern with the most blocks in service. Use for questions about the "
+            "DESIGN DAY: finds the single hardest service day in the selected agency's built "
+            "timetable for battery-electric buses in a season, i.e. the day a fleet plan must be "
+            "able to cover. It is the day pattern with the most blocks over one charge's range; "
+            "ties go to the pattern with the most blocks in service. Use for questions about the "
             "worst-case day, which day to plan around, or the hardest day overall when no date "
             "is given. Returns the dates sharing that pattern, the same fleet figures as "
             "get_fleet_feasibility for that day, and the data snapshot. For a specific date, "
@@ -129,19 +149,40 @@ TOOLS = [
         ),
         "input_schema": {
             "type": "object",
-            "properties": {
-                "season": {
-                    "type": "string",
-                    "enum": ["summer", "winter"],
-                    "description": "Season for energy use; winter uses more (heating)",
-                },
-            },
-            "required": ["season"],
+            "properties": {"agency": AGENCY_PROPERTY, "season": SEASON_PROPERTY},
+            "required": ["agency", "season"],
             "additionalProperties": False,
         },
         "strict": True,
     },
 ]
+
+
+def summary_for(agency_key):
+    """The agency's pre-built summary, or None if it hasn't been built."""
+    return load_summary(SUMMARY_DIR / f"{get_agency(agency_key).key}.json")
+
+
+def raw_feed_for(agency_key):
+    """Local-development fallback: a raw feed the standard daily functions can read, or None.
+    Only agencies with exact stop_times distances and published blocks qualify (Halifax)."""
+    agency = get_agency(agency_key)
+    if agency.distance != "stop_times" or agency.blocks != "gtfs":
+        return None
+    path = HALIFAX_FEED if agency.key == "halifax" else PROJECT_ROOT / agency.feeds[0]
+    return path if path.exists() else None
+
+
+def method_note(summary):
+    """A short label for single-block answers when the numbers aren't exact."""
+    stamp = summary["stamp"] if summary else {}
+    notes = []
+    if stamp.get("distance_method", "").startswith("ESTIMATED"):
+        notes.append(f"distance ESTIMATED from straight lines between stops x road factor "
+                     f"{stamp.get('road_factor')}")
+    if stamp.get("block_method", "").startswith("INFERRED"):
+        notes.append("block INFERRED by chaining trips at terminals")
+    return f" [{'; '.join(notes)}]" if notes else ""
 
 
 def lookup_block(block_values, block_id, date_text):
@@ -156,80 +197,91 @@ def lookup_block(block_values, block_id, date_text):
 def snapshot(summary):
     """The part of the summary's stamp worth showing to the model."""
     stamp = summary["stamp"]
-    return {
-        "feed_version": stamp["feed_version"],
-        "feed_sha256": stamp["feed_sha256"][:12],
+    shown = {
+        "agency": stamp["agency_name"],
+        "feeds": [f"{f['file']} version {f['version']} sha256 {f['sha256'][:12]}" for f in stamp["feeds"]],
         "timetable_covers": f"{stamp['calendar_start']} to {stamp['calendar_end']}",
+        "dates_built": stamp["dates_built"],
+        "distance_method": stamp["distance_method"],
+        "block_method": stamp["block_method"],
         "summary_built": stamp["built_at"],
     }
+    if "road_factor" in stamp:
+        shown["road_factor"] = stamp["road_factor"]
+        shown["road_factor_calibration"] = stamp.get("road_factor_calibration")
+    return shown
 
 
-def blocks_on(date_text, field):
-    """{block_id: km or minutes} for one date, from the summary if built, else from the feed.
+def blocks_on(agency_key, date_text, field):
+    """{block_id: km or minutes} for one date, plus (message, summary).
 
-    Returns (values, message). With a summary, message explains an empty result, telling
-    "no service that day" apart from "date outside the timetable".
+    From the agency's summary if built, else (Halifax, local development) from the raw feed.
+    message explains an empty result: no service that day, or a date outside the summary.
     """
     service_date = date.fromisoformat(date_text)
-    summary = load_summary(SUMMARY_FILE)
+    agency = get_agency(agency_key)
+    summary = summary_for(agency.key)
     if summary is None:
+        feed = raw_feed_for(agency.key)
+        if feed is None:
+            return {}, f"No pre-built summary is available for {agency.name}.", None
         compute = daily_block_distance if field == "km" else daily_block_duration
-        return compute(HALIFAX_FEED, service_date), None
+        return compute(feed, service_date), None, None
     group = service_day_for(summary, service_date)
     if group is not None:
-        return {b: v[field] for b, v in group["blocks"].items()}, None
+        return {b: v[field] for b, v in group["blocks"].items()}, None, summary
     stamp = summary["stamp"]
     if stamp["calendar_start"] <= date_text <= stamp["calendar_end"]:
-        return {}, f"No Halifax Transit bus service runs on {date_text}."
+        return {}, f"No {agency.name} bus service runs on {date_text}.", summary
     return {}, (
-        f"{date_text} is outside the timetable, which covers {stamp['calendar_start']} "
-        f"to {stamp['calendar_end']}."
-    )
+        f"{date_text} is outside the dates available for {agency.name}: "
+        f"{stamp['calendar_start']} to {stamp['calendar_end']} ({stamp['dates_built']})."
+    ), summary
 
 
-def get_block_distance(block_id, date_text):
+def get_block_distance(block_id, date_text, agency=DEFAULT_AGENCY):
     """Run our tested code and return a short text result for Claude."""
-    distances, message = blocks_on(date_text, "km")
+    distances, message, summary = blocks_on(agency, date_text, "km")
     if message:
         return message
     km, not_running = lookup_block(distances, block_id, date_text)
     if not_running:
         return not_running
-    return f"Block {block_id} drives {km:.1f} revenue km on {date_text}."
+    return f"Block {block_id} drives {km:.1f} revenue km on {date_text}.{method_note(summary)}"
 
 
-def get_block_duration(block_id, date_text):
+def get_block_duration(block_id, date_text, agency=DEFAULT_AGENCY):
     """Run our tested code and return a short text result for Claude."""
-    durations, message = blocks_on(date_text, "minutes")
+    durations, message, summary = blocks_on(agency, date_text, "minutes")
     if message:
         return message
     minutes, not_running = lookup_block(durations, block_id, date_text)
     if not_running:
         return not_running
     hours, mins = divmod(round(minutes), 60)
-    return f"Block {block_id} is in service for {hours} h {mins} min on {date_text}."
+    return (f"Block {block_id} is in service for {hours} h {mins} min on {date_text}."
+            f"{method_note(summary)}")
 
 
-def get_fleet_feasibility(date_text, season):
+def get_fleet_feasibility(date_text, season, agency=DEFAULT_AGENCY):
     """Run the fleet check and return its result as JSON text for Claude."""
     range_km_for(season)  # rejects an unknown season before any work
-    distances, message = blocks_on(date_text, "km")
+    distances, message, summary = blocks_on(agency, date_text, "km")
     if message:
         return message
     if not distances:
         return f"No bus service in the feed on {date_text}; the feed may not cover that date."
     result = {"service_date": date_text, **assess_distances(distances, season)}
-    summary = load_summary(SUMMARY_FILE)
     if summary is not None:
         result["data_snapshot"] = snapshot(summary)
     return json.dumps(result)
 
 
-def get_design_day(season):
-    """Pick the hardest service day from the summary for this season's range."""
-    summary = load_summary(SUMMARY_FILE)
+def get_design_day(season, agency=DEFAULT_AGENCY):
+    """Pick the hardest service day from the agency's summary for this season's range."""
+    summary = summary_for(agency)
     if summary is None:
-        return "No pre-built summary is available, so the design day can't be chosen."
+        return f"No pre-built summary is available for {get_agency(agency).name}, so the design day can't be chosen."
     range_km, _ = range_km_for(season)
     group, over = design_day(summary, range_km)
     if group is None:
@@ -251,10 +303,13 @@ def get_design_day(season):
 
 # Each tool name, and how to call its Python function with Claude's inputs.
 TOOL_FUNCTIONS = {
-    "get_block_distance": lambda i: get_block_distance(i["block_id"], i["date"]),
-    "get_block_duration": lambda i: get_block_duration(i["block_id"], i["date"]),
-    "get_fleet_feasibility": lambda i: get_fleet_feasibility(i["date"], i["season"]),
-    "get_design_day": lambda i: get_design_day(i["season"]),
+    "get_block_distance": lambda i: get_block_distance(
+        i["block_id"], i["date"], i.get("agency", DEFAULT_AGENCY)),
+    "get_block_duration": lambda i: get_block_duration(
+        i["block_id"], i["date"], i.get("agency", DEFAULT_AGENCY)),
+    "get_fleet_feasibility": lambda i: get_fleet_feasibility(
+        i["date"], i["season"], i.get("agency", DEFAULT_AGENCY)),
+    "get_design_day": lambda i: get_design_day(i["season"], i.get("agency", DEFAULT_AGENCY)),
 }
 
 
@@ -274,29 +329,30 @@ class AgentError(Exception):
     """The agent could not produce an answer: missing setup, a refusal, or no final answer."""
 
 
-def check_block_data():
-    """Raise AgentError unless the tools have data: the pre-built summary (used in the deployed
-    container, which holds no raw feed) or, for local development, the raw feed."""
-    if load_summary(SUMMARY_FILE) is None and not HALIFAX_FEED.exists():
+def check_block_data(agency=DEFAULT_AGENCY):
+    """Raise AgentError unless the tools have data for the agency: its pre-built summary (used in
+    the deployed container, which holds no raw feed) or, for local development, a raw feed."""
+    if summary_for(agency) is None and raw_feed_for(agency) is None:
         raise AgentError(
-            f"No block data: neither the summary {SUMMARY_FILE.name} nor the raw feed "
-            f"{FEED_PATH_SETTING} was found (build one with scripts/build_summaries.py)"
+            f"No block data for {get_agency(agency).name}: no summary in {SUMMARY_DIR.name}/ and "
+            "no usable raw feed (build one with scripts/build_summaries.py)"
         )
 
 
-def answer_question(question, log=None):
-    """Answer one question and return {"answer", "tool_calls", "rounds"}.
+def answer_question(question, agency=DEFAULT_AGENCY, log=None):
+    """Answer one question about one agency and return {"answer", "tool_calls", "rounds"}.
 
     tool_calls lists every tool Claude asked for, as {"name", "input", "result"}.
     log, if given, is called with each progress line as it happens (the script passes print).
     Raises AgentError for setup problems or no answer; Anthropic API errors are passed through.
     """
     log = log or (lambda text: None)
+    get_agency(agency)  # ValueError for an unknown agency
 
     load_dotenv(PROJECT_ROOT / ".env")
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise AgentError("ANTHROPIC_API_KEY not found: add it to .env and save the file")
-    check_block_data()
+    check_block_data(agency)
 
     client = anthropic.Anthropic()
     messages = [{"role": "user", "content": question}]
@@ -308,7 +364,7 @@ def answer_question(question, log=None):
         response = client.beta.messages.create(
             model=MODEL,
             max_tokens=16000,
-            system=SYSTEM,
+            system=system_prompt(agency),
             tools=TOOLS,
             messages=messages,
             output_config={"effort": "medium"},

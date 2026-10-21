@@ -133,18 +133,32 @@
     .note { background: var(--note-bg); color: var(--note-text); border-color: transparent; font-size: 0.9rem; }
     footer { color: var(--muted); font-size: 0.85rem; margin-top: 24px; }
     footer a { color: inherit; }
+    select {
+      width: 100%; padding: 10px 12px; font: inherit; color: inherit;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      margin-bottom: 14px;
+    }
+    .estimate { color: var(--note-text); background: var(--note-bg); border-radius: 6px;
+      padding: 6px 10px; margin: 0 0 14px; font-size: 0.9rem; }
     [hidden] { display: none !important; }
   </style>
 </head>
 <body>
 <main>
   <h1>Transit AI: could an electric bus run it?</h1>
-  <p class="lead">
+  <p id="lead" class="lead">
     A first-pass check of which Halifax Transit bus blocks could run on one overnight charge,
     using public GTFS schedule data (valid to 29 Nov 2026) and placeholder battery assumptions.
   </p>
 
   <form id="ask-form" class="card">
+    <label for="agency">Agency</label>
+    <select id="agency" name="agency">
+      <option value="halifax">Halifax Transit</option>
+      <option value="dublin">Dublin (Dublin Bus and Go-Ahead Ireland)</option>
+      <option value="london">London (TfL buses)</option>
+    </select>
+    <p id="estimate-note" class="estimate" hidden></p>
     <label for="question">Ask a question</label>
     <textarea id="question" name="question" maxlength="500"
       placeholder="e.g. How far does block 722145 drive on 14 October 2026?"></textarea>
@@ -156,11 +170,7 @@
 
   <section class="card" aria-labelledby="examples-title">
     <p id="examples-title" class="examples-title">Or try an example</p>
-    <div class="examples">
-      <button type="button">How many Halifax blocks could run on one overnight charge in winter on 14 October 2026, and which are the hardest?</button>
-      <button type="button">How far does block 722145 drive on 14 October 2026?</button>
-      <button type="button">Give me the distance and service time for block 722318 on 14 October 2026.</button>
-    </div>
+    <div id="examples" class="examples"></div>
   </section>
 
   <div id="loading" class="card loading" hidden aria-live="polite">
@@ -188,7 +198,7 @@
   </div>
 
   <footer>
-    Data: Halifax Transit GTFS, under the Open Government Licence – Halifax.
+    Data: <span id="data-credit">Halifax Transit GTFS, under the Open Government Licence – Halifax</span>.
     This demo answers a limited number of questions per visitor and per day.
     <a href="https://github.com/Jlod95/transit-ai">Source code on GitHub</a>.
   </footer>
@@ -204,7 +214,50 @@
   const form = document.getElementById("ask-form");
   const input = document.getElementById("question");
   const askButton = document.getElementById("ask-button");
-  const exampleButtons = document.querySelectorAll(".examples button");
+  const agencySelect = document.getElementById("agency");
+  const examplesBox = document.getElementById("examples");
+
+  // What the page shows for each agency. Example block ids exist on the dates used.
+  const AGENCY_INFO = {
+    halifax: {
+      lead: "A first-pass check of which Halifax Transit bus blocks could run on one overnight " +
+        "charge, using public GTFS schedule data (valid to 29 Nov 2026) and placeholder battery " +
+        "assumptions.",
+      estimate: "",
+      credit: "Halifax Transit GTFS, under the Open Government Licence – Halifax",
+      examples: [
+        "How many Halifax blocks could run on one overnight charge in winter on 14 October 2026, and which are the hardest?",
+        "How far does block 722145 drive on 14 October 2026?",
+        "Give me the distance and service time for block 722318 on 14 October 2026.",
+      ],
+    },
+    dublin: {
+      lead: "A first-pass check of which Dublin Bus and Go-Ahead Ireland blocks could run on one " +
+        "overnight charge, using the National Transport Authority's GTFS data (to 30 Jan 2027) " +
+        "and placeholder battery assumptions.",
+      estimate: "",
+      credit: "National Transport Authority (Transport for Ireland) GTFS, under CC BY 4.0",
+      examples: [
+        "How many Dublin blocks could run on one overnight charge in winter on 28 October 2026, and which are the hardest?",
+        "Which day should Dublin plan its electric fleet around in winter?",
+        "Give me the distance and service time for block 5997_7778195_3065001 on 28 October 2026.",
+      ],
+    },
+    london: {
+      lead: "A rough first pass at which TfL bus blocks could run on one overnight charge, using " +
+        "the Bus Open Data Service timetable for the 4 weeks from 21 Oct 2026 and placeholder " +
+        "battery assumptions.",
+      estimate: "London figures are approximate: distances are estimated from straight lines " +
+        "between stops, and blocks are inferred by chaining trips, because the data publishes " +
+        "neither.",
+      credit: "Bus Open Data Service (Department for Transport), under the Open Government Licence v3.0",
+      examples: [
+        "How many London TfL blocks could run on one overnight charge in winter on 28 October 2026, and which are the hardest?",
+        "Which day should London plan its electric fleet around in winter?",
+        "Give me the distance and service time for block 25-1 on 28 October 2026.",
+      ],
+    },
+  };
   const loading = document.getElementById("loading");
   const loadingText = document.getElementById("loading-text");
   const errorBox = document.getElementById("error");
@@ -229,7 +282,8 @@
 
   function setBusy(busy) {
     askButton.disabled = busy;
-    exampleButtons.forEach((b) => (b.disabled = busy));
+    agencySelect.disabled = busy;
+    examplesBox.querySelectorAll("button").forEach((b) => (b.disabled = busy));
   }
 
   function showError(message) {
@@ -306,7 +360,7 @@
       const response = await fetch("/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, agency: agencySelect.value }),
       });
       let data = null;
       try { data = await response.json(); } catch { /* not JSON */ }
@@ -315,7 +369,8 @@
         showError(friendlyError(response.status, detail));
         return;
       }
-      document.getElementById("result-question").textContent = "Q: " + question;
+      document.getElementById("result-question").textContent =
+        `Q (${agencySelect.options[agencySelect.selectedIndex].text}): ${question}`;
       document.getElementById("answer").innerHTML = renderMarkdown(data.answer || "");
       renderSteps(data.tool_calls || [], data.rounds || 0);
       document.getElementById("steps-box").open = false;
@@ -342,12 +397,33 @@
     }
   });
 
-  exampleButtons.forEach((button) =>
-    button.addEventListener("click", () => {
-      input.value = button.textContent.trim();
-      ask(input.value);
-    })
-  );
+  // Show the selected agency's description, data credit and example questions.
+  function showAgency() {
+    const info = AGENCY_INFO[agencySelect.value];
+    document.getElementById("lead").textContent = info.lead;
+    document.getElementById("data-credit").textContent = info.credit;
+    const note = document.getElementById("estimate-note");
+    note.textContent = info.estimate;
+    note.hidden = !info.estimate;
+    examplesBox.replaceChildren();
+    for (const text of info.examples) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = text;
+      button.addEventListener("click", () => {
+        input.value = text;
+        ask(text);
+      });
+      examplesBox.append(button);
+    }
+  }
+
+  agencySelect.addEventListener("change", () => {
+    result.hidden = true;
+    errorBox.hidden = true;
+    showAgency();
+  });
+  showAgency();
 </script>
 </body>
 </html>

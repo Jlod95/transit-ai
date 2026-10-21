@@ -2,7 +2,8 @@
 
 Usage:
     python scripts/ask_blocks.py "How long is block 722145 in service on 14 October 2026?"
-    python scripts/ask_blocks.py            (no question: asks a built-in example)
+    python scripts/ask_blocks.py --agency dublin "Which day should Dublin plan around in winter?"
+    python scripts/ask_blocks.py            (no question: asks a built-in Halifax example)
 
 The agent itself lives in src/agent.py; this script only passes the question in and prints
 progress as it happens.
@@ -24,11 +25,15 @@ DEFAULT_QUESTION = (
 
 
 def main():
-    # Everything typed after the script name is the question.
-    question = " ".join(sys.argv[1:]).strip() or DEFAULT_QUESTION
+    # Everything typed after the script name (and any --agency NAME) is the question.
+    args = sys.argv[1:]
+    agency = "halifax"
+    if len(args) >= 2 and args[0] == "--agency":
+        agency, args = args[1], args[2:]
+    question = " ".join(args).strip() or DEFAULT_QUESTION
     try:
-        answer_question(question, log=print)
-    except AgentError as e:
+        answer_question(question, agency, log=print)
+    except (AgentError, ValueError) as e:
         sys.exit(str(e))
     except anthropic.AuthenticationError:
         sys.exit("API key missing or invalid: check ANTHROPIC_API_KEY in .env")
