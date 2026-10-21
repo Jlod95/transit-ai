@@ -1,201 +1,276 @@
 # Deploying Transit AI to Azure Container Apps
 
-This guide deploys the Docker image from this repo to **Azure Container Apps**, a service that
-runs containers for you and can scale down to zero copies when nobody is using the app.
+This is how the live demo was deployed on 20 Oct 2026, with the exact commands used. It runs
+the Docker image from this repo on **Azure Container Apps**, a service that runs containers for
+you and scales down to zero copies when nobody is using the app.
 
-All commands are for **PowerShell on Windows**. Nothing here has been run yet; work through it
-yourself, one step at a time, and read each command's output before moving on.
+Live app: https://transit-ai.wittypebble-5d89ce05.canadacentral.azurecontainerapps.io
 
-## Cost summary (read first)
+All commands are for **PowerShell on Windows**, run from the project folder. Read each
+command's output before moving on.
 
-| Step | Costs money? |
-|---|---|
-| Installing the Azure CLI, logging in | Free |
-| Resource group | Free (it's just a folder for resources) |
-| Container registry (Basic tier) | **Costs money** — billed per day for as long as it exists, even if unused |
-| Container Apps environment | Free on its own (Consumption plan) |
-| Container App, scaled to zero | Mostly free: there is a monthly free allowance of CPU, memory and requests. You pay only above it |
-| Log Analytics (logs) | **Can cost money** if logs are sent there; this guide turns it off |
-| Budget alert | Free |
+## What gets created, and why
 
-Prices change. Before you start, check:
-- Container Apps pricing: https://azure.microsoft.com/pricing/details/container-apps/
-- Container Registry pricing: https://azure.microsoft.com/pricing/details/container-registry/
-- Pricing calculator: https://azure.microsoft.com/pricing/calculator/
-- Your actual spend at any time: Azure Portal → **Cost Management**
+Everything lives in **one resource group**, so the whole project can be deleted in one step.
 
-**Set up the budget alert (section 9) before creating anything that costs money.**
+| Resource | Name | What it is for |
+|---|---|---|
+| Resource group | `rg-transit-ai` | A folder holding everything below; delete it to delete the project |
+| Container registry (Basic) | `transitaijlod95` | Private storage for the Docker image; Azure pulls the image from here. Password login is off |
+| Log Analytics workspace | `log-transit-ai` | Keeps the app's log output for 30 days, so logs survive after the app scales to zero |
+| Container Apps environment | `cae-transit-ai` | The shared space the app runs in: networking, the public HTTPS front door, the link to logs |
+| Container app | `transit-ai` | The running service: 0 to 1 copies, 0.25 CPU, 0.5 GiB memory, HTTPS on port 8000 |
+| Managed identity + AcrPull role | (on the app) | The app's own Azure identity, allowed only to read images from the registry, so no registry password is stored |
+| Secret | `anthropic-api-key` | The Anthropic API key, stored encrypted in the app and given to the code as `ANTHROPIC_API_KEY` |
 
-## 0. Fill in your names
+**Why max 1 replica:** the `/ask` rate limiter keeps its counters in memory. Two copies would
+each count separately and double the daily cap, so there must only ever be one copy.
+**Why min 0:** no copies run while nobody is visiting, so there is nothing to pay for. The
+first visit after a quiet period takes 10-30 seconds longer while a copy starts ("cold start").
 
-Pick values and set them once per PowerShell window. Every later command uses these variables.
+## Cost (Canada Central, checked 20 Oct 2026)
+
+| Resource | Price | Expected per month at very low traffic |
+|---|---|---|
+| Resource group, environment, identity, secret | Free | $0 |
+| Container registry, Basic | CA$0.236/day, charged even when idle; 10 GB storage included | **about CA$7.20** |
+| Container app | Free monthly allowance per subscription: 180,000 vCPU-seconds, 360,000 GiB-seconds, 2 million requests. At 0.25 vCPU / 0.5 GiB that is 200 hours of running time | about $0 |
+| Log Analytics | First 5 GB/month free per billing account, then CA$3.91/GB | about $0 (a few KB/day) |
+| **Total** | | **about CA$7-8/month**, almost all of it the registry |
+
+The Anthropic API is billed separately; `DAILY_QUESTION_CAP=100` limits it to 100 questions a day.
+
+Prices change. Check before relying on them:
+- https://azure.microsoft.com/pricing/details/container-apps/
+- https://azure.microsoft.com/pricing/details/container-registry/
+- https://azure.microsoft.com/pricing/details/log-analytics/
+- https://azure.microsoft.com/pricing/calculator/
+- Your actual spend: Azure Portal → **Cost Management**
+
+**Set up the budget alert (section 10) before creating anything that costs money.**
+
+## 0. Names used
+
+Set these once per PowerShell window; later commands use them. The registry name must be
+unique across all of Azure (check with `az acr check-name -n <name>`).
 
 ```powershell
-$RG       = "<RESOURCE_GROUP>"   # e.g. rg-transit-ai
-$LOCATION = "<LOCATION>"         # e.g. canadacentral, eastus, uksouth
-$ACR      = "<ACR_NAME>"         # globally unique, 5-50 lowercase letters/numbers, e.g. transitai12345
-$ENV_NAME = "<ENVIRONMENT_NAME>" # e.g. cae-transit-ai
-$APP      = "<APP_NAME>"         # e.g. transit-ai
-$IMAGE    = "transit-ai:v1"      # image name and version tag
+$RG       = "rg-transit-ai"
+$LOCATION = "canadacentral"
+$ACR      = "transitaijlod95"
+$LOGS     = "log-transit-ai"
+$ENV_NAME = "cae-transit-ai"
+$APP      = "transit-ai"
 ```
 
-If you close PowerShell, run this block again before continuing.
-
-## 1. Install the Azure CLI (free)
-
-The Azure CLI is the `az` command. Install it with Windows' built-in package manager:
+## 1. Install the Azure CLI and sign in (free)
 
 ```powershell
 winget install --exact --id Microsoft.AzureCLI
 ```
 
-Close and reopen PowerShell, then check it works:
-
-```powershell
-az --version
-```
-
-## 2. Log in (free)
-
-This opens a browser for you to sign in to your Azure account:
+Close and reopen PowerShell, then sign in (this opens a browser) and check the subscription:
 
 ```powershell
 az login
-```
-
-If you have more than one subscription, check which one is active:
-
-```powershell
 az account show --output table
 ```
 
-Install the Container Apps extension and register the services it needs (one-off, free):
+## 2. One-off setup (free)
+
+Add the Container Apps and Log Analytics extensions to the CLI, and register the Azure
+services this project uses on your subscription. `--wait` returns once registration is done
+(a few minutes).
 
 ```powershell
 az extension add --name containerapp --upgrade
-az provider register --namespace Microsoft.App
-az provider register --namespace Microsoft.OperationalInsights
+az extension add --name log-analytics
+az provider register --namespace Microsoft.App --wait
+az provider register --namespace Microsoft.ContainerRegistry --wait
+az provider register --namespace Microsoft.OperationalInsights --wait
 ```
 
-## 3. Create a resource group (free)
-
-A resource group holds everything for this project, so you can see and delete it all together.
+## 3. Resource group (free)
 
 ```powershell
-az group create --name $RG --location $LOCATION
+az group create --name $RG --location $LOCATION --tags project=transit-ai
 ```
 
-## 4. Create a container registry (costs money)
-
-A registry is private storage for your Docker images. Azure pulls the image from here.
+## 4. Container registry (costs money from now on)
 
 ```powershell
-az acr create --resource-group $RG --name $ACR --sku Basic
+az acr create --resource-group $RG --name $ACR --sku Basic --location $LOCATION
 ```
 
-## 5. Build and push the image
-
-Build locally with Docker, then push to the registry:
+## 5. Log Analytics workspace
 
 ```powershell
+az monitor log-analytics workspace create --resource-group $RG --workspace-name $LOGS --location $LOCATION
+```
+
+## 6. Build and push the image
+
+Commit your changes first, then tag the image with the commit ID so you can always tell which
+code is live. The Dockerfile downloads the Halifax GTFS feed during the build.
+
+```powershell
+$TAG = git rev-parse --short HEAD
 az acr login --name $ACR
-docker build -t "$ACR.azurecr.io/$IMAGE" .
-docker push "$ACR.azurecr.io/$IMAGE"
+docker build -t "$ACR.azurecr.io/transit-ai:$TAG" .
+docker push "$ACR.azurecr.io/transit-ai:$TAG"
 ```
 
-Alternative without local Docker: `az acr build --registry $ACR --image $IMAGE .` builds in Azure
-instead. This uses "ACR Tasks", which is billed per build minute and may be unavailable on
-free-trial subscriptions.
+## 7. Container Apps environment (free on its own)
 
-## 6. Create the Container Apps environment (free on its own)
-
-The environment is the shared space your app runs in. `--logs-destination none` stops it creating
-a Log Analytics workspace, which could otherwise charge for stored logs. You can turn logging on
-later if you need it.
+The workspace ID and key are read into variables and passed straight to the next command,
+so the key is never printed.
 
 ```powershell
-az containerapp env create --name $ENV_NAME --resource-group $RG --location $LOCATION --logs-destination none
+$WS_ID  = az monitor log-analytics workspace show -g $RG -n $LOGS --query customerId -o tsv
+$WS_KEY = az monitor log-analytics workspace get-shared-keys -g $RG -n $LOGS --query primarySharedKey -o tsv
+az containerapp env create `
+  --name $ENV_NAME `
+  --resource-group $RG `
+  --location $LOCATION `
+  --logs-destination log-analytics `
+  --logs-workspace-id $WS_ID `
+  --logs-workspace-key $WS_KEY
 ```
 
-## 7. Create the app (port 8000, public, scale to zero)
+(The backtick `` ` `` at the end of a line continues the command on the next line.)
+
+## 8. Container app
 
 ```powershell
 az containerapp create `
   --name $APP `
   --resource-group $RG `
   --environment $ENV_NAME `
-  --image "$ACR.azurecr.io/$IMAGE" `
+  --image "$ACR.azurecr.io/transit-ai:$TAG" `
   --registry-server "$ACR.azurecr.io" `
   --registry-identity system `
   --target-port 8000 `
   --ingress external `
   --min-replicas 0 `
-  --max-replicas 1
+  --max-replicas 1 `
+  --cpu 0.25 `
+  --memory 0.5Gi `
+  --env-vars DAILY_QUESTION_CAP=100
 ```
 
-What each option means:
+What the options mean:
+- `--registry-identity system`: give the app its own Azure identity with read-only (AcrPull)
+  access to the registry, instead of storing a registry password.
 - `--target-port 8000`: the port uvicorn listens on inside the container.
-- `--ingress external`: give the app a public HTTPS address.
-- `--registry-identity system`: the app gets its own Azure identity and permission to pull from
-  your registry, so no registry password is stored.
-- `--min-replicas 0`: **scale to zero** — no copies run when there's no traffic. The first request
-  after a quiet period is slower (a "cold start") while a copy starts up.
-- `--max-replicas 1`: never run more than one copy, which caps cost.
+- `--ingress external`: a public HTTPS address. Plain `http://` is redirected to `https://`.
+- `--min-replicas 0` / `--max-replicas 1`: scale to zero when idle, never more than one copy.
+- `--cpu 0.25 --memory 0.5Gi`: the smallest size; plenty for this app.
 
-(The backtick `` ` `` at the end of each line is PowerShell's way of continuing a command onto the
-next line.)
+The app starts without the API key: `/health` and the page work, `/ask` does not yet.
 
-## 8. Test it
+## 9. Add the API key as a secret
 
-Get the public address:
+The key must never be in the image, a file, or a command (commands are kept in your terminal
+history). So it is pasted directly into the Azure Portal:
 
-```powershell
-az containerapp show --name $APP --resource-group $RG --query properties.configuration.ingress.fqdn --output tsv
-```
+1. Go to https://portal.azure.com, search for **transit-ai** and open the **Container App**.
+2. Open **Settings → Secrets → + Add**.
+3. **Key:** `anthropic-api-key`. **Type:** Container Apps Secret. **Value:** paste the key.
+4. Click **Add**.
 
-Then open `https://<that-address>/health` in a browser. You should see `{"status":"ok"}`.
-
-Note: Azure Container Apps ignores the Dockerfile's `HEALTHCHECK`. It has its own "health
-probes", which you can configure later if needed.
-
-### Deploying a new version
-
-Build and push with a new tag (e.g. `transit-ai:v2`), then:
+Then point the app's `ANTHROPIC_API_KEY` at the secret. This command contains only the
+secret's name, never its value. It creates a new revision (version) of the app.
 
 ```powershell
-az containerapp update --name $APP --resource-group $RG --image "$ACR.azurecr.io/transit-ai:v2"
+az containerapp secret list -n $APP -g $RG --query "[].name" -o tsv
+az containerapp update --name $APP --resource-group $RG --set-env-vars ANTHROPIC_API_KEY=secretref:anthropic-api-key
 ```
 
-### Secrets
-
-Never copy `.env` into the image (`.dockerignore` already excludes it). To give the app a secret,
-store it in Container Apps and expose it as an environment variable:
+To replace the key later, edit the secret's value in the Portal, then restart the app so
+it picks up the new value:
 
 ```powershell
-az containerapp secret set --name $APP --resource-group $RG --secrets "<secret-name>=<value>"
-az containerapp update --name $APP --resource-group $RG --set-env-vars "<ENV_VAR_NAME>=secretref:<secret-name>"
+az containerapp revision restart -n $APP -g $RG --revision (az containerapp show -n $APP -g $RG --query properties.latestRevisionName -o tsv)
 ```
 
-## 9. Set a budget alert (free)
+## 10. Check it works
 
-A budget sends you an email when spending reaches a threshold. It does **not** stop resources
-or cap spending; it only warns you. The Azure Portal is the simplest way:
+```powershell
+$URL = "https://" + (az containerapp show -n $APP -g $RG --query properties.configuration.ingress.fqdn -o tsv)
+$URL
+curl.exe -s "$URL/health"
+```
+
+You should see `{"status":"ok"}`. Open `$URL` in a browser for the demo page.
+
+Azure Container Apps ignores the Dockerfile's `HEALTHCHECK`; it has its own health probes.
+
+## 11. Viewing logs
+
+**Live**, while a copy is running (it streams until you press Ctrl+C). If the app has scaled to
+zero there is nothing to stream; open the page first to wake it.
+
+```powershell
+az containerapp logs show -n $APP -g $RG --type console --follow
+```
+
+**Past logs** (kept 30 days), even when the app is scaled to zero. New lines take a few
+minutes to arrive.
+
+- In the Portal: open the container app → **Monitoring → Logs**, close the query picker, and
+  run:
+
+  ```kusto
+  ContainerAppConsoleLogs_CL
+  | where ContainerAppName_s == "transit-ai"
+  | project TimeGenerated, RevisionName_s, Log_s
+  | order by TimeGenerated desc
+  ```
+
+  Add `| where Log_s has "/ask"` before `project` to see only the one-line-per-question log
+  (`/ask status=200 rounds=2 rate_limited=no`).
+
+- From PowerShell:
+
+  ```powershell
+  $WS_ID = az monitor log-analytics workspace show -g $RG -n $LOGS --query customerId -o tsv
+  az monitor log-analytics query --workspace $WS_ID -o table --analytics-query "ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'transit-ai' and Log_s has '/ask' | project TimeGenerated, Log_s | order by TimeGenerated desc | take 20"
+  ```
+
+## 12. Deploying a new version
+
+Commit, then build and push with the new commit ID as the tag, and point the app at it:
+
+```powershell
+$TAG = git rev-parse --short HEAD
+az acr login --name $ACR
+docker build -t "$ACR.azurecr.io/transit-ai:$TAG" .
+docker push "$ACR.azurecr.io/transit-ai:$TAG"
+az containerapp update --name $APP --resource-group $RG --image "$ACR.azurecr.io/transit-ai:$TAG"
+```
+
+To fetch a newer Halifax feed, add `--no-cache` to `docker build` (Docker otherwise reuses the
+feed it downloaded last time). The current feed is valid to 29 Nov 2026.
+
+## 13. Budget alert (free)
+
+A budget emails you when spending reaches a threshold. It does **not** stop resources or cap
+spending; it only warns you.
 
 1. Go to https://portal.azure.com and search for **Cost Management**.
-2. Choose **Budgets** → **+ Add**.
-3. Check the **Scope** is your subscription.
-4. Name it (e.g. `transit-ai-monthly`), set **Reset period** to Monthly and **Amount** to
-   something small, e.g. 10 in your currency.
-5. Click **Next**, add alert conditions, e.g. **Actual** at 50%, **Actual** at 100%, and
+2. Choose **Budgets** → **+ Add**, and check the **Scope** is your subscription.
+3. Name it (e.g. `transit-ai-monthly`), set **Reset period** to Monthly and **Amount** to
+   e.g. 10 (CAD).
+4. Click **Next**, add alert conditions, e.g. **Actual** at 50%, **Actual** at 100%, and
    **Forecasted** at 100%.
-6. Enter your email under **Alert recipients** and click **Create**.
+5. Enter your email under **Alert recipients** and click **Create**.
 
-Cost data can lag by up to a day or so, so alerts aren't instant.
+Cost data can lag by a day or so, so alerts aren't instant.
 
-## 10. Clean up when finished
+## 14. Deleting everything
 
-Deleting the resource group removes everything inside it, including the registry, and stops
-all charges from it. This cannot be undone, so check the name first:
+Deleting the resource group removes every resource above (registry, logs, environment, app,
+secret) and stops all charges from them. This cannot be undone, so check the name first:
 
 ```powershell
 az group delete --name $RG
