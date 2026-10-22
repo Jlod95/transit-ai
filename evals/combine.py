@@ -21,7 +21,10 @@ SPLIT_OF = {"halifax": SPLITS[0], "dublin": SPLITS[1], "london": SPLITS[1]}
 
 
 def grades(records):
-    """{label: {record index: pass}}: the current grade, plus the original one for a re-graded run."""
+    """{grader label: [pass per record]}: every grader version a re-graded run keeps (see
+    evals/regrade.py), or the original and current grade, or just the current one."""
+    if all("grades" in r for r in records):
+        return {label: [r["grades"][label] for r in records] for label in records[0]["grades"]}
     out = {}
     if all("checks_before" in r for r in records):
         out["v1"] = [r["checks_before"]["pass"] for r in records]
@@ -57,11 +60,21 @@ def overview(paths):
                 by_task[r["task_id"]].append(p)
             cells.append(f"{sum(passes)}/{len(passes)} · {sum(all(t) for t in by_task.values())}/{n_tasks}")
         passed = sum(list(g.values())[-1])
-        rows.append(f"| {run['stamp']['model']} | " + " | ".join(cells)
-                    + f" | ${sum(costs) / len(costs):.4f} | ${sum(costs) / passed:.4f} | ${sum(costs):.2f} |")
+        rows.append(f"| {run['stamp']['model']} | " + " | ".join(cells) + f" | {disclosure(records)} | "
+                    f"${sum(costs) / len(costs):.4f} | ${sum(costs) / passed:.4f} | ${sum(costs):.2f} |")
     head = ("| Model | " + " | ".join(f"{label}: attempts passed · pass^{k}" for label in labels)
-            + f" | Cost / attempt | Cost / passed attempt ({labels[-1]}) | Total cost |")
-    return [head, "|---" * (len(labels) + 4) + "|"] + rows
+            + f" | Disclosure ({labels[-1]}, separate) | Cost / attempt | "
+            f"Cost / passed attempt ({labels[-1]}) | Total cost |")
+    return [head, "|---" * (len(labels) + 5) + "|"] + rows
+
+
+def disclosure(records):
+    """"passed/applicable" for the separate disclosure check, or "n/a" for runs graded without it."""
+    applicable = [r["checks"]["disclosure"] for r in records
+                  if r["checks"].get("disclosure", {}).get("applies")]
+    if not any("disclosure" in r["checks"] for r in records):
+        return "n/a"
+    return f"{sum(c['pass'] for c in applicable)}/{len(applicable)}"
 
 
 def summarise(path):
@@ -109,6 +122,11 @@ def summarise(path):
             else:
                 why = "unsupported: " + ", ".join(check["numbers"])
             detail.append(f"- `{r['task_id']}` #{r['attempt']} {c}: {why}")
+    for r in records:
+        c = r["checks"].get("disclosure", {})
+        if c.get("applies") and not c["pass"]:
+            detail.append(f"- `{r['task_id']}` #{r['attempt']} disclosure (separate): doesn't say "
+                          + " or ".join({"estimat": "estimated", "infer": "inferred"}[m] for m in c["missing"]))
     lines += [f"<details><summary>Failure details ({label})</summary>", ""] + (detail or ["- none"])
     lines += ["", "</details>", ""]
     return "\n".join(lines)
@@ -118,7 +136,10 @@ def main(out, paths):
     body = ["# Model benchmark: all 30 tasks", "",
             ("pass@k: a task passes if any of its k attempts passes. pass^k: only if all k pass. "
             "Cost and latency are per attempt (one answered question). Re-graded runs show the "
-            "original grade (v1) next to the current grader's (v1.1); the answers are the same. "
+            "grade under every grader version (v1, v1.1, v1.2) side by side; the answers are the same. "
+            "Disclosure (v1.2, not part of the pass): London answers built on tool output flagged "
+            "ESTIMATED / INFERRED must say distances are estimated and blocks inferred; shown as "
+            "passed/applicable attempts. "
             "Cost per passed attempt = total cost / attempts passed."), ""]
     body += overview(paths) + [""]
     body += [summarise(p) for p in paths]

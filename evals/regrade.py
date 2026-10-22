@@ -2,6 +2,11 @@
 
 Usage:
     python evals/regrade.py evals/results/20261022T165735Z-dev-k1.json
+    python evals/regrade.py evals/results/<run>-regraded.json v1.2
+
+With a grader label, each record keeps the pass/fail under every grader version in "grades"
+(a run's first grade is v1; a run re-graded once before has v1 and v1.1), so reports can show
+them side by side. Re-grading a -regraded file updates it in place.
 
 Uses the agent context saved with the run; older runs saved none, so it is rebuilt from the
 current code (only valid if the prompt and tools haven't changed since that run's commit).
@@ -19,7 +24,7 @@ from evals.run import CHECKS, TASKS, agent_context, report
 from evals.verify import verify
 
 
-def main(path):
+def main(path, grader=None):
     path = Path(path)
     run = json.loads(path.read_text(encoding="utf-8"))
     tasks = {t["id"]: t for t in map(json.loads, TASKS.read_text(encoding="utf-8").splitlines()) if t}
@@ -43,14 +48,21 @@ def main(path):
               + (f"  (derived: {', '.join(d['number'] for d in warn)})" if warn else "")
               + (f"  (unsupported: {', '.join(after['unsupported']['numbers'])})"
                  if after["unsupported"].get("numbers") else ""))
+        if grader:
+            grades = record.get("grades") or (
+                {"v1": record["checks_before"]["pass"], "v1.1": before["pass"]}
+                if "checks_before" in record else {"v1": before["pass"]})
+            record["grades"] = {**grades, grader: after["pass"]}
         record["checks_before"] = before
         record["checks"] = after
         record["pass"] = after["pass"]
     run["contexts"] = contexts
     run["stamp"]["regraded"] = True
+    if grader:
+        run["stamp"]["grader"] = grader
     run["stamp"]["context"] = "rebuilt from current code" if rebuilt else "saved with the run"
     # Append the suffix, not with_suffix(): a model ID like "v4.1" puts a dot in the name.
-    out = path.with_name(path.stem + "-regraded")
+    out = path.with_name(path.stem.removesuffix("-regraded") + "-regraded")
     out.with_name(out.name + ".json").write_text(json.dumps(run, indent=1) + "\n", encoding="utf-8", newline="\n")
     out.with_name(out.name + ".md").write_text(report(run["stamp"], run["records"]), encoding="utf-8", newline="\n")
     passed = sum(r["pass"] for r in run["records"])
@@ -58,4 +70,4 @@ def main(path):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)

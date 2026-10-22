@@ -10,6 +10,7 @@
 - sources_index_sha256: `50fa90fd2d7797859d69ec35b593a47c72803a2e245061306eee3f40b239da0a`
 - regraded: `True`
 - context: `saved with the run`
+- grader: `v1.2`
 - summary dublin.json: `3388eadb751c`
 - summary halifax.json: `fad5dfa62ae6`
 - summary london.json: `cfcc403967f8`

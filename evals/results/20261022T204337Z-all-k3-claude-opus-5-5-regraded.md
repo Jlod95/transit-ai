@@ -10,18 +10,19 @@
 - sources_index_sha256: `50fa90fd2d7797859d69ec35b593a47c72803a2e245061306eee3f40b239da0a`
 - regraded: `True`
 - context: `saved with the run`
+- grader: `v1.2`
 - summary dublin.json: `3388eadb751c`
 - summary halifax.json: `fad5dfa62ae6`
 - summary london.json: `cfcc403967f8`
 
-**Pass rate: 87/90 attempts (97%)** · cost $4.33 · 14.2 min
+**Pass rate: 89/90 attempts (99%)** · cost $4.33 · 14.2 min
 
 ## By check
 
 | Check | Passed |
 |---|---|
 | steps | 90/90 |
-| end_state | 88/90 |
+| end_state | 90/90 |
 | unsupported | 89/90 |
 
 ## By category
@@ -39,9 +40,9 @@
 | feasibility_winter | 5/6 | 2/2 | 1/2 |
 | fleet_size | 6/6 | 2/2 | 2/2 |
 | not_running | 6/6 | 2/2 | 2/2 |
-| outside_timetable | 4/6 | 2/2 | 0/2 |
+| outside_timetable | 6/6 | 2/2 | 2/2 |
 | sources | 6/6 | 2/2 | 2/2 |
-| **all** | 87/90 | 30/30 | 27/30 |
+| **all** | 89/90 | 30/30 | 29/30 |
 
 ## Derived numbers (warnings, not failures): 13
 
@@ -64,10 +65,8 @@
 ### steps (0)
 
 
-### end_state (2)
+### end_state (0)
 
-- `halifax-12-outside_timetable` #1: missing says the date isn't covered (phrase)
-- `london-07-outside_timetable` #3: missing says the date isn't covered (phrase)
 
 ### unsupported (1)
 
