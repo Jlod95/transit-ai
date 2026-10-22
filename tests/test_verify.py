@@ -148,3 +148,19 @@ def test_outside_fact_is_still_unsupported():
 def test_numbers_in_the_agent_context_are_supported():
     result = levels("The battery is 400 kWh.", context="Toronto-trial battery (400 kWh, 71.25% usable)")
     assert result["pass"] and result["derived"] == []
+
+
+def test_not_running_is_checked_structurally():
+    task = {"id": "fake-not_running", "question": "How far does block 722241 drive on 29 August 2026?",
+            "expected_calls": [], "ignore_tokens": ["722241"],
+            "oracle": [{"type": "block_not_running", "label": "doesn't run", "block_id": "722241"}]}
+    call = {"name": "get_block_distance",
+            "input": {"agency": "halifax", "block_id": "722241", "date": "2026-08-29"},
+            "result": "Block 722241 does not run on 2026-08-29."}
+    # Any wording passes, as long as the tool said so and no km or time is given for the block.
+    worded = "Block 722241 doesn't drive at all on 29 August 2026; the timetable doesn't schedule it."
+    assert verify(task, {"answer": worded, "tool_calls": [call]})["end_state"]["pass"]
+    # A distance for a block that doesn't run fails, and so does skipping the tool.
+    invented = "Block 722241 doesn't run that day; on weekdays it drives about 150 km."
+    assert not verify(task, {"answer": invented, "tool_calls": [call]})["end_state"]["pass"]
+    assert not verify(task, {"answer": worded, "tool_calls": []})["end_state"]["pass"]

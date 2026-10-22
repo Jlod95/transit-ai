@@ -169,7 +169,24 @@ def check_steps(task, tool_calls):
     return {"pass": not missing, "missing": missing}
 
 
-def check_end_state(task, answer):
+BLOCK_TOOLS = ("get_block_distance", "get_block_duration")
+
+
+def _block_not_running(item, answer, tool_calls, ignore_tokens):
+    """Structural check: a block tool reported the block doesn't run that day, and the answer
+    gives no distance or time figure (no number in km/miles or minutes/hours)."""
+    reported = any(
+        call["name"] in BLOCK_TOOLS
+        and str(call.get("input", {}).get("block_id", "")) == item["block_id"]
+        and "does not run" in str(call.get("result", ""))
+        for call in tool_calls
+    )
+    figures = [raw for _, _, raw, family in parse_with_units(_strip_ignored(answer, ignore_tokens))
+               if family in ("distance", "time")]
+    return reported and not figures
+
+
+def check_end_state(task, answer, tool_calls=()):
     """Oracle numbers present (any accepted rendering) and required statements present."""
     missing = []
     numbers = parse_numbers(_strip_ignored(answer, task.get("ignore_tokens", [])))
@@ -184,6 +201,8 @@ def check_end_state(task, answer):
             ok = any(p.lower() in lowered for p in item["phrases"])
         elif item["type"] == "date_any":
             ok = any(d.lower() in answer.lower() for d in item["renderings"])
+        elif item["type"] == "block_not_running":
+            ok = _block_not_running(item, answer, tool_calls, task.get("ignore_tokens", []))
         else:
             raise ValueError(f"unknown oracle type {item['type']}")
         if not ok:
@@ -242,7 +261,7 @@ def verify(task, result, context=""):
         return {"steps": failed, "end_state": failed, "unsupported": failed, "pass": False}
     checks = {
         "steps": check_steps(task, result["tool_calls"]),
-        "end_state": check_end_state(task, result["answer"]),
+        "end_state": check_end_state(task, result["answer"], result["tool_calls"]),
         "unsupported": check_unsupported(task, result["answer"], result["tool_calls"], context),
     }
     checks["pass"] = all(c["pass"] for c in checks.values())

@@ -23,9 +23,6 @@ from src.agent import run_tool, summary_for
 
 SEED = 2026
 OUT = Path(__file__).parent / "tasks.jsonl"
-NOT_RUNNING_PHRASES = ["does not run", "doesn't run", "not run", "isn't running", "is not running",
-                       "not in service", "no service", "doesn't operate", "does not operate",
-                       "not operating", "isn't scheduled", "is not scheduled", "not scheduled"]
 OUTSIDE_PHRASES = ["outside", "not covered", "doesn't cover", "does not cover", "only covers",
                    "beyond", "isn't covered", "is not covered", "not available", "no data"]
 ABSTAIN_PHRASES = ["can't", "cannot", "can not", "don't have", "do not have", "not available",
@@ -202,8 +199,8 @@ class Builder:
                          f"How far does block {block} drive on {say(date.fromisoformat(other))}?",
                          [{"name_any": ["get_block_distance", "get_block_duration"],
                            "args": {"agency": agency, "block_id": block, "date": other}}],
-                         [{"type": "phrase_any", "label": "says it doesn't run",
-                           "phrases": NOT_RUNNING_PHRASES}], [block])
+                         [{"type": "block_not_running", "label": "reports it doesn't run, no km or time",
+                           "block_id": block}], [block])
                 return
         raise RuntimeError(f"no not-running case found for {agency}")
 

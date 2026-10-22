@@ -4,6 +4,7 @@ Usage:
     python evals/run.py --split dev --k 1
     python evals/run.py --split heldout --k 5
     python evals/run.py --ids halifax-01-block_distance,halifax-06-design_day
+    python evals/run.py --split dev --k 5 --model claude-sonnet-5-5 --concurrency 5
 
 Calls answer_question directly (not over HTTP, so the /ask rate limits don't apply); every
 attempt is a real, paid API call. Writes evals/results/<time>-<split>-k<k>.json (every answer,
@@ -16,6 +17,7 @@ import json
 import sys
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -32,8 +34,15 @@ from src.provenance import current_git_commit
 
 TASKS = Path(__file__).parent / "tasks.jsonl"
 RESULTS = Path(__file__).parent / "results"
-# US$ per million tokens for MODEL at the time of writing (input, output); thinking counts as output.
-PRICE_PER_MTOK = {"claude-opus-5-5": (4.00, 20.00)}
+# US$ per million tokens at the time of writing (input, output); thinking counts as output.
+# A model missing here still runs; its cost is recorded as unknown (None).
+PRICE_PER_MTOK = {
+    "claude-fable-5-1": (10.00, 50.00),
+    "claude-opus-5-5": (4.00, 20.00),
+    "claude-opus-5": (5.00, 25.00),
+    "claude-sonnet-5-5": (2.00, 10.00),
+    "claude-haiku-5-5": (0.10, 0.50),
+}
 CHECKS = ("steps", "end_state", "unsupported")
 
 
@@ -58,42 +67,53 @@ def agent_context(agency):
     return "\n".join(parts)
 
 
-def cost(usage):
-    price_in, price_out = PRICE_PER_MTOK[MODEL]
-    return (usage["input_tokens"] * price_in + usage["output_tokens"] * price_out) / 1e6
+def cost(usage, model):
+    """US$ for the tokens used, or None if the model's price isn't listed."""
+    if model not in PRICE_PER_MTOK:
+        return None
+    price_in, price_out = PRICE_PER_MTOK[model]
+    return round((usage["input_tokens"] * price_in + usage["output_tokens"] * price_out) / 1e6, 4)
 
 
-def run(tasks, k, contexts):
-    records = []
-    for task in tasks:
-        for attempt in range(1, k + 1):
-            started = time.perf_counter()
-            try:
-                out = answer_question(task["question"], task["agency"])
-                result = {"answer": out["answer"], "tool_calls": out["tool_calls"]}
-                usage = out["usage"]
-            except (AgentError, anthropic.APIError, ValueError) as e:  # a failed attempt, not a crash
-                result = {"error": f"{type(e).__name__}: {e}"}
-                usage = {"input_tokens": 0, "output_tokens": 0}
-            checks = verify(task, result, contexts[task["agency"]])
-            records.append({
-                "task_id": task["id"], "agency": task["agency"], "category": task["category"],
-                "attempt": attempt, "pass": checks["pass"], "checks": checks,
-                "seconds": round(time.perf_counter() - started, 1),
-                "usage": usage, "cost_usd": round(cost(usage), 4), **result,
-            })
-            status = "PASS" if checks["pass"] else "fail " + ",".join(
-                c for c in CHECKS if not checks[c]["pass"])
-            print(f"  {task['id']:32} #{attempt} {status:28} ${cost(usage):.3f} {records[-1]['seconds']}s")
-    return records
+def attempt_once(task, attempt, context, model):
+    """One graded attempt at one task."""
+    started = time.perf_counter()
+    try:
+        out = answer_question(task["question"], task["agency"], model=model)
+        result = {"answer": out["answer"], "tool_calls": out["tool_calls"]}
+        usage = out["usage"]
+    except (AgentError, anthropic.APIError, ValueError) as e:  # a failed attempt, not a crash
+        result = {"error": f"{type(e).__name__}: {e}"}
+        usage = {"input_tokens": 0, "output_tokens": 0}
+    checks = verify(task, result, context)
+    record = {
+        "task_id": task["id"], "agency": task["agency"], "category": task["category"],
+        "attempt": attempt, "model": model, "pass": checks["pass"], "checks": checks,
+        "seconds": round(time.perf_counter() - started, 1),
+        "usage": usage, "cost_usd": cost(usage, model), **result,
+    }
+    status = "PASS" if checks["pass"] else "fail " + ",".join(c for c in CHECKS if not checks[c]["pass"])
+    price = f"${record['cost_usd']:.3f}" if record["cost_usd"] is not None else "$?"
+    print(f"  {task['id']:32} #{attempt} {status:28} {price} {record['seconds']}s", flush=True)
+    return record
 
 
-def stamp(split, k, ids):
+def run(tasks, k, contexts, model, concurrency):
+    """Every (task, attempt) pair, up to `concurrency` at a time; records come back in task order."""
+    jobs = [(task, attempt) for task in tasks for attempt in range(1, k + 1)]
+    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
+        futures = [pool.submit(attempt_once, task, attempt, contexts[task["agency"]], model)
+                   for task, attempt in jobs]
+        return [f.result() for f in futures]
+
+
+def stamp(split, k, ids, model, concurrency):
     return {
         "timestamp": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "split": "ids" if ids else split,
         "k": k,
-        "model": MODEL,
+        "model": model,
+        "concurrency": concurrency,
         "git_commit": current_git_commit(),
         "tasks_sha256": sha256(TASKS),
         "summaries_sha256": {p.name: sha256(p) for p in sorted((ROOT / "data" / "summaries").glob("*.json"))},
@@ -106,7 +126,7 @@ def report(stamp_, records):
     lines += [f"- {key}: `{value}`" for key, value in stamp_.items() if key != "summaries_sha256"]
     lines += [f"- summary {name}: `{h[:12]}`" for name, h in stamp_["summaries_sha256"].items()]
     passed = sum(r["pass"] for r in records)
-    total_cost = sum(r["cost_usd"] for r in records)
+    total_cost = sum(r["cost_usd"] or 0 for r in records)
     minutes = sum(r["seconds"] for r in records) / 60
     headline = (f"**Pass rate: {passed}/{len(records)} attempts ({100 * passed / len(records):.0f}%)**"
                 f" · cost ${total_cost:.2f} · {minutes:.1f} min")
@@ -167,14 +187,16 @@ def main():
     parser.add_argument("--split", choices=["dev", "heldout", "all"], default="dev")
     parser.add_argument("--k", type=int, default=1, help="attempts per task")
     parser.add_argument("--ids", default="", help="comma-separated task ids (overrides --split)")
+    parser.add_argument("--model", default=MODEL, help=f"any Anthropic model ID (default {MODEL})")
+    parser.add_argument("--concurrency", type=int, default=5, help="attempts run in parallel")
     args = parser.parse_args()
     ids = [i for i in args.ids.split(",") if i]
 
     tasks = load_tasks(args.split, ids)
-    print(f"Running {len(tasks)} tasks x k={args.k} on {MODEL}")
-    stamp_ = stamp(args.split, args.k, ids)
+    print(f"Running {len(tasks)} tasks x k={args.k} on {args.model}, {args.concurrency} at a time")
+    stamp_ = stamp(args.split, args.k, ids, args.model, args.concurrency)
     contexts = {agency: agent_context(agency) for agency in sorted({t["agency"] for t in tasks})}
-    records = run(tasks, args.k, contexts)
+    records = run(tasks, args.k, contexts, args.model, args.concurrency)
 
     RESULTS.mkdir(exist_ok=True)
     name = f"{stamp_['timestamp'].replace(':', '').replace('-', '')}-{stamp_['split']}-k{args.k}"
@@ -183,7 +205,7 @@ def main():
         encoding="utf-8", newline="\n")
     (RESULTS / f"{name}.md").write_text(report(stamp_, records), encoding="utf-8", newline="\n")
     passed = sum(r["pass"] for r in records)
-    print(f"Pass {passed}/{len(records)}; cost ${sum(r['cost_usd'] for r in records):.2f}; "
+    print(f"Pass {passed}/{len(records)}; cost ${sum(r['cost_usd'] or 0 for r in records):.2f}; "
           f"wrote evals/results/{name}.json and .md")
 
 

@@ -32,6 +32,8 @@ from src.summaries import design_day, load_summary, service_day_for
 PROJECT_ROOT = Path(__file__).parent.parent
 
 MODEL = "claude-opus-5-5"
+# Models that accept the server-side refusal fallback in "default" mode.
+FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
 SUMMARY_DIR = PROJECT_ROOT / os.environ.get("SUMMARY_DIR", "data/summaries")
 # A relative FEED_PATH is taken from the project root; an absolute one is used as is.
 FEED_PATH_SETTING = os.environ.get("FEED_PATH", "data/raw/halifax.zip")
@@ -466,10 +468,11 @@ def check_block_data(agency=DEFAULT_AGENCY):
         )
 
 
-def answer_question(question, agency=DEFAULT_AGENCY, log=None):
+def answer_question(question, agency=DEFAULT_AGENCY, log=None, model=None):
     """Answer one question about one agency and return {"answer", "tool_calls", "rounds", "usage"}.
 
     usage totals the tokens over every round (for cost tracking; /ask doesn't return it).
+    model: any Anthropic model ID (default MODEL); evals use it to compare models.
 
     tool_calls lists every tool Claude asked for, as {"name", "input", "result"}.
     log, if given, is called with each progress line as it happens (the script passes print).
@@ -489,17 +492,21 @@ def answer_question(question, agency=DEFAULT_AGENCY, log=None):
     usage = {"input_tokens": 0, "output_tokens": 0}
     log(f"QUESTION: {question}\n")
 
+    model = model or MODEL
+    # Server-side refusal fallback ("default" mode) only exists for some models.
+    fallback = {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"} \
+        if model in FALLBACK_MODELS else {}
+
     for round_number in range(1, MAX_ROUNDS + 1):
         log(f"--- Round {round_number}: sending conversation to Claude ---")
         response = client.beta.messages.create(
-            model=MODEL,
+            model=model,
             max_tokens=16000,
             system=system_prompt(agency),
             tools=TOOLS,
             messages=messages,
             output_config={"effort": "medium"},
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
+            **fallback,
         )
 
         # Keep Claude's whole reply in the conversation, exactly as it came back.
