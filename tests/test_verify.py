@@ -164,3 +164,14 @@ def test_not_running_is_checked_structurally():
     invented = "Block 722241 doesn't run that day; on weekdays it drives about 150 km."
     assert not verify(task, {"answer": invented, "tool_calls": [call]})["end_state"]["pass"]
     assert not verify(task, {"answer": worded, "tool_calls": []})["end_state"]["pass"]
+
+
+def test_digits_in_tool_field_names_are_supported():
+    # "p90" in the field name block_error_p90_pct is what the answer's "90th percentile" refers to.
+    call = {"name": "get_fleet_feasibility", "input": {"agency": "london", "date": "2026-10-14"},
+            "result": '{"within_range": 512, "block_error_p90_pct": 12.4}'}
+    answer = "512 blocks fit; distances are within 12.4% at the 90th percentile."
+    assert check_unsupported(COST_TASK, answer, [call])["numbers"] == []
+    # Only field names count: the same digits in a value or free text do not.
+    other = {**call, "result": "Error at p90 is 12.4% for 512 blocks."}
+    assert check_unsupported(COST_TASK, answer, [other])["numbers"] == ["90"]

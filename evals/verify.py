@@ -7,6 +7,8 @@ Three checks, each reported separately:
 - unsupported: every number in the answer gets one of three levels:
     supported   - matches a tool output, the question, or the agent's context (tool
                   descriptions, system prompt, source entries), at the answer's own precision;
+                  digits inside a tool output's field names count too
+                  (block_error_p90_pct -> 90, as in "p90 error");
     derived     - a warning, not a failure: one general rule turns a supported number into it
                   (rounding to fewer significant figures; percent <-> fraction or complement to
                   100%, only for percentages; a unit conversion within the number's own unit
@@ -36,6 +38,7 @@ _DATES = [
     re.compile(rf"\b(?:{_MONTHS})\.?\s+\d{{1,2}}(?:st|nd|rd|th)?\b", re.IGNORECASE),
 ]
 _URL = re.compile(r"https?://\S+")
+_FIELD_NAME = re.compile(r'"([A-Za-z_]\w*)"\s*:')  # a JSON key, e.g. "block_error_p90_pct":
 _LIST_MARKER = re.compile(r"^\s*\d+[.)]\s", re.MULTILINE)
 SMALL_COUNT = 10  # bare integers up to this are treated as prose ("5 longest", "2 tools")
 
@@ -145,6 +148,8 @@ def tool_numbers(tool_calls):
     """(every number in every tool call's input and result, {number: "percent"/"multiplier"})."""
     numbers, kinds = set(), {}
     for call in tool_calls:
+        for name in _FIELD_NAME.findall(str(call.get("result", ""))):
+            numbers.update(float(d) for d in re.findall(r"\d+", name))
         for text in (json.dumps(call.get("input", {})), str(call.get("result", ""))):
             for value, _, _, family in parse_with_units(_URL.sub(" ", text)):
                 numbers.add(value)
