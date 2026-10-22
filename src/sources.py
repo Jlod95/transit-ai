@@ -20,6 +20,7 @@ INDEX_FILE = PROJECT_ROOT / os.environ.get("SOURCES_INDEX", "data/index/sources.
 PASSAGE_WORDS = 250  # bge-small reads at most 512 tokens (~380 words); 500 would be cut off
 OVERLAP_WORDS = 50
 MAX_K = 10
+PER_DOCUMENT = 3  # most results any one document may contribute to a search
 
 # Some PDFs extract unmapped glyphs as "/gid00030"-style tokens; they carry no meaning.
 _GLYPH_TOKEN = re.compile(r"/gid\d+")
@@ -100,20 +101,29 @@ def load_index(path=INDEX_FILE):
     return _index_cache[str(path)][1]
 
 
-def search(query, k=5, index=None):
-    """The k passages closest to the query, best first, with their source details."""
+def search(query, k=5, index=None, per_document=PER_DOCUMENT):
+    """The k passages closest to the query, best first, with their source details.
+
+    At most `per_document` results come from any one document, so a long full-text document
+    can't crowd out the short fact cards from the others.
+    """
     index = index if index is not None else load_index()
     if index is None:
         raise FileNotFoundError("No sources index; build it with scripts/build_source_index.py")
     k = max(1, min(int(k), MAX_K))
     scores = index["matrix"] @ embed_query(query)
     documents = {d["id"]: d for d in index["stamp"]["documents"]}
-    results = []
-    for rank, i in enumerate(np.argsort(-scores)[:k], start=1):
+    results, taken = [], {}
+    for i in np.argsort(-scores):
+        if len(results) == k:
+            break
         passage = index["passages"][int(i)]
+        if taken.get(passage["doc"], 0) >= per_document:
+            continue
+        taken[passage["doc"]] = taken.get(passage["doc"], 0) + 1
         doc = documents[passage["doc"]]
         results.append({
-            "rank": rank,
+            "rank": len(results) + 1,
             "score": round(float(scores[i]), 3),
             "id": passage["id"],
             "kind": passage["kind"],
