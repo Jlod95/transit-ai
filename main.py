@@ -98,7 +98,7 @@ def ask(body: AskRequest, request: Request):
         except anthropic.APIError:
             raise HTTPException(status_code=502, detail="The Anthropic API request failed; try again.")
         rounds = result["rounds"]
-        return result
+        return {key: result[key] for key in ("answer", "tool_calls", "rounds")}
     except HTTPException as e:
         status = e.status_code
         raise

@@ -461,7 +461,9 @@ def check_block_data(agency=DEFAULT_AGENCY):
 
 
 def answer_question(question, agency=DEFAULT_AGENCY, log=None):
-    """Answer one question about one agency and return {"answer", "tool_calls", "rounds"}.
+    """Answer one question about one agency and return {"answer", "tool_calls", "rounds", "usage"}.
+
+    usage totals the tokens over every round (for cost tracking; /ask doesn't return it).
 
     tool_calls lists every tool Claude asked for, as {"name", "input", "result"}.
     log, if given, is called with each progress line as it happens (the script passes print).
@@ -478,6 +480,7 @@ def answer_question(question, agency=DEFAULT_AGENCY, log=None):
     client = anthropic.Anthropic()
     messages = [{"role": "user", "content": question}]
     tool_calls = []
+    usage = {"input_tokens": 0, "output_tokens": 0}
     log(f"QUESTION: {question}\n")
 
     for round_number in range(1, MAX_ROUNDS + 1):
@@ -495,6 +498,8 @@ def answer_question(question, agency=DEFAULT_AGENCY, log=None):
 
         # Keep Claude's whole reply in the conversation, exactly as it came back.
         messages.append({"role": "assistant", "content": response.content})
+        usage["input_tokens"] += response.usage.input_tokens
+        usage["output_tokens"] += response.usage.output_tokens
 
         texts = [b.text for b in response.content if b.type == "text" and b.text.strip()]
         label = "FINAL ANSWER" if response.stop_reason == "end_turn" else "CLAUDE SAYS"
@@ -502,7 +507,8 @@ def answer_question(question, agency=DEFAULT_AGENCY, log=None):
             log(f"{label}:\n{text}\n")
 
         if response.stop_reason == "end_turn":
-            return {"answer": "\n\n".join(texts), "tool_calls": tool_calls, "rounds": round_number}
+            return {"answer": "\n\n".join(texts), "tool_calls": tool_calls, "rounds": round_number,
+                    "usage": usage}
         if response.stop_reason == "refusal":
             raise AgentError("Claude declined to answer this request")
         if response.stop_reason != "tool_use":
