@@ -49,9 +49,10 @@ def main(path):
     run["contexts"] = contexts
     run["stamp"]["regraded"] = True
     run["stamp"]["context"] = "rebuilt from current code" if rebuilt else "saved with the run"
+    # Append the suffix, not with_suffix(): a model ID like "v4.1" puts a dot in the name.
     out = path.with_name(path.stem + "-regraded")
-    out.with_suffix(".json").write_text(json.dumps(run, indent=1) + "\n", encoding="utf-8", newline="\n")
-    out.with_suffix(".md").write_text(report(run["stamp"], run["records"]), encoding="utf-8", newline="\n")
+    out.with_name(out.name + ".json").write_text(json.dumps(run, indent=1) + "\n", encoding="utf-8", newline="\n")
+    out.with_name(out.name + ".md").write_text(report(run["stamp"], run["records"]), encoding="utf-8", newline="\n")
     passed = sum(r["pass"] for r in run["records"])
     print(f"After: {passed}/{len(run['records'])} pass; wrote {out.name}.json and .md")
 

@@ -3,8 +3,9 @@
 Usage:
     python evals/combine.py OUT.md RESULT1.json RESULT2.json ...
 
-Per model: pass@k and pass^k for dev and held-out separately, failed attempts by check type,
-average cost and latency per attempt (one answered question).
+Per model: pass@k and pass^k for dev and held-out separately (for a re-graded run, under the
+original grader and the current one side by side), failed attempts by check type, average cost
+and latency per attempt (one answered question), and cost per passed attempt.
 """
 
 import json
@@ -15,32 +16,83 @@ from pathlib import Path
 CHECKS = ("steps", "end_state", "unsupported")
 
 
+SPLITS = ("dev (Halifax)", "held-out (Dublin, London)")
+SPLIT_OF = {"halifax": SPLITS[0], "dublin": SPLITS[1], "london": SPLITS[1]}
+
+
+def grades(records):
+    """{label: {record index: pass}}: the current grade, plus the original one for a re-graded run."""
+    out = {}
+    if all("checks_before" in r for r in records):
+        out["v1"] = [r["checks_before"]["pass"] for r in records]
+    out["v1.1" if out else "current"] = [r["pass"] for r in records]
+    return out
+
+
+def split_scores(records, passes, split):
+    """(attempts passed, attempts, pass@k tasks, pass^k tasks, tasks) for one split."""
+    by_task = defaultdict(list)
+    for r, p in zip(records, passes, strict=True):
+        if SPLIT_OF[r["agency"]] == split:
+            by_task[r["task_id"]].append(p)
+    attempts = [p for t in by_task.values() for p in t]
+    return (sum(attempts), len(attempts), sum(any(t) for t in by_task.values()),
+            sum(all(t) for t in by_task.values()), len(by_task))
+
+
+def overview(paths):
+    """One row per model: all 30 tasks, every grader version, cost per attempt and per pass."""
+    rows, labels = [], None
+    for path in paths:
+        run = json.loads(Path(path).read_text(encoding="utf-8"))
+        records, k = run["records"], run["stamp"]["k"]
+        g = grades(records)
+        labels = list(g)
+        costs = [r["cost_usd"] or 0 for r in records]
+        cells = []
+        for passes in g.values():
+            n_tasks = len({r["task_id"] for r in records})
+            by_task = defaultdict(list)
+            for r, p in zip(records, passes, strict=True):
+                by_task[r["task_id"]].append(p)
+            cells.append(f"{sum(passes)}/{len(passes)} · {sum(all(t) for t in by_task.values())}/{n_tasks}")
+        passed = sum(list(g.values())[-1])
+        rows.append(f"| {run['stamp']['model']} | " + " | ".join(cells)
+                    + f" | ${sum(costs) / len(costs):.4f} | ${sum(costs) / passed:.4f} | ${sum(costs):.2f} |")
+    head = ("| Model | " + " | ".join(f"{label}: attempts passed · pass^{k}" for label in labels)
+            + f" | Cost / attempt | Cost / passed attempt ({labels[-1]}) | Total cost |")
+    return [head, "|---" * (len(labels) + 4) + "|"] + rows
+
+
 def summarise(path):
     run = json.loads(Path(path).read_text(encoding="utf-8"))
     stamp, records = run["stamp"], run["records"]
-    split_of = {"halifax": "dev (Halifax)", "dublin": "held-out (Dublin, London)",
-                "london": "held-out (Dublin, London)"}
-    by_task = defaultdict(list)
-    for r in records:
-        by_task[(split_of[r["agency"]], r["task_id"])].append(r["pass"])
+    k = stamp["k"]
+    g = grades(records)
     lines = [f"## {stamp['model']}", "",
-             (f"Run `{Path(path).name}` · commit `{stamp['git_commit']}` · k={stamp['k']} · "
+             (f"Run `{Path(path).name}` · commit `{stamp['git_commit']}` · k={k} · "
              f"{stamp['timestamp']}"), "",
-             f"| Split | Tasks | Attempts passed | pass@{stamp['k']} | pass^{stamp['k']} |",
-             "|---|---|---|---|---|"]
-    for split in ("dev (Halifax)", "held-out (Dublin, London)"):
-        tasks = [v for (s, _), v in by_task.items() if s == split]
-        attempts = [p for t in tasks for p in t]
-        lines.append(f"| {split} | {len(tasks)} | {sum(attempts)}/{len(attempts)} | "
-                     f"{sum(any(t) for t in tasks)}/{len(tasks)} | {sum(all(t) for t in tasks)}/{len(tasks)} |")
+             "| Split | Tasks | " + " | ".join(f"{label} attempts | {label} pass@{k} | {label} pass^{k}"
+                                              for label in g) + " |",
+             "|---|---|" + "---|---|---|" * len(g)]
+    for split in SPLITS:
+        cells = []
+        for passes in g.values():
+            ok, n, at_k, all_k, tasks = split_scores(records, passes, split)
+            cells.append(f"{ok}/{n} | {at_k}/{tasks} | {all_k}/{tasks}")
+        lines.append(f"| {split} | {tasks} | " + " | ".join(cells) + " |")
 
     failed = {c: sum(not r["checks"][c]["pass"] for r in records) for c in CHECKS}
     costs = [r["cost_usd"] for r in records if r["cost_usd"] is not None]
     seconds = [r["seconds"] for r in records]
-    lines += ["", ("| Failed attempts: steps | end state | unsupported numbers | Avg cost / attempt | "
-              "Avg latency / attempt | Total cost |"), "|---|---|---|---|---|---|",
+    passed = sum(r["pass"] for r in records)
+    label = list(g)[-1]
+    lines += ["", (f"| Failed attempts ({label}): steps | end state | unsupported numbers | "
+              f"Avg cost / attempt | Cost / passed attempt | Avg latency / attempt | Total cost |"),
+              "|---|---|---|---|---|---|---|",
               (f"| {failed['steps']} | {failed['end_state']} | {failed['unsupported']} | "
-              f"${sum(costs) / len(costs):.4f} | {sum(seconds) / len(seconds):.1f} s | ${sum(costs):.2f} |"), ""]
+              f"${sum(costs) / len(costs):.4f} | ${sum(costs) / passed:.4f} | "
+              f"{sum(seconds) / len(seconds):.1f} s | ${sum(costs):.2f} |"), ""]
 
     detail = []
     for r in records:
@@ -57,15 +109,18 @@ def summarise(path):
             else:
                 why = "unsupported: " + ", ".join(check["numbers"])
             detail.append(f"- `{r['task_id']}` #{r['attempt']} {c}: {why}")
-    lines += ["<details><summary>Failure details</summary>", ""] + (detail or ["- none"])
+    lines += [f"<details><summary>Failure details ({label})</summary>", ""] + (detail or ["- none"])
     lines += ["", "</details>", ""]
     return "\n".join(lines)
 
 
 def main(out, paths):
-    body = ["# Model benchmark: eval-v1 harness, all 30 tasks", "",
+    body = ["# Model benchmark: all 30 tasks", "",
             ("pass@k: a task passes if any of its k attempts passes. pass^k: only if all k pass. "
-            "Cost and latency are per attempt (one answered question)."), ""]
+            "Cost and latency are per attempt (one answered question). Re-graded runs show the "
+            "original grade (v1) next to the current grader's (v1.1); the answers are the same. "
+            "Cost per passed attempt = total cost / attempts passed."), ""]
+    body += overview(paths) + [""]
     body += [summarise(p) for p in paths]
     Path(out).write_text("\n".join(body), encoding="utf-8", newline="\n")
     print(f"Wrote {out}")
