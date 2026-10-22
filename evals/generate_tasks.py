@@ -23,12 +23,6 @@ from src.agent import run_tool, summary_for
 
 SEED = 2026
 OUT = Path(__file__).parent / "tasks.jsonl"
-OUTSIDE_PHRASES = ["outside", "not covered", "doesn't cover", "does not cover", "only covers",
-                   "beyond", "isn't covered", "is not covered", "not available", "no data"]
-ABSTAIN_PHRASES = ["can't", "cannot", "can not", "don't have", "do not have", "not available",
-                   "no data", "unable", "isn't available", "is not available", "doesn't include",
-                   "does not include", "doesn't contain", "does not contain", "not in the data",
-                   "no information", "don't hold", "do not hold", "not something"]
 
 
 def call(name, **args):
@@ -45,12 +39,6 @@ def number(label, *options):
 
 def say(d):
     return f"{d.day} {d:%B %Y}"
-
-
-def date_renderings(iso):
-    d = date.fromisoformat(iso)
-    return [iso, say(d), f"{d:%B} {d.day}, {d.year}", f"{d:%B} {d.day}", f"{d.day} {d:%B}",
-            f"{d:%b} {d.day}", f"{d.day} {d:%b}"]
 
 
 class Builder:
@@ -141,7 +129,7 @@ class Builder:
                  f"Which day should {name} plan its electric fleet around in {season}, and how many "
                  f"blocks would be too long for one charge that day?",
                  [{"name": "get_design_day", "args": {"agency": agency, "season": season}}],
-                 [{"type": "date_any", "label": "design day", "renderings": date_renderings(r["design_day"])},
+                 [{"type": "date", "label": "design day", "date": r["design_day"]},
                   number("blocks over range", [r["blocks_over_range"]])])
 
     def fleet_size(self, agency, season):
@@ -178,8 +166,7 @@ class Builder:
     def sources(self, agency, question, query, doc_id, number_pattern=None):
         r = json.loads(call("search_sources", query=query, k=5))
         hit = next(x for x in r["results"] if x["id"].startswith(doc_id + "#"))
-        oracle = [{"type": "phrase_any", "label": "cites the source",
-                   "phrases": [hit["title"], hit["publisher"]]}]
+        oracle = [{"type": "cites_source", "label": "cites the source", "doc_id": doc_id}]
         if number_pattern:
             oracle.append(number("figure from the source",
                                  [float(re.search(number_pattern, hit["text"]).group(1))]))
@@ -212,12 +199,13 @@ class Builder:
                  f"How far does block {block} drive on {say(after)}?",
                  [{"name_any": ["get_block_distance", "get_block_duration"],
                    "args": {"agency": agency, "block_id": block, "date": after.isoformat()}}],
-                 [{"type": "phrase_any", "label": "says the date isn't covered", "phrases": OUTSIDE_PHRASES}],
+                 [{"type": "date_not_covered", "label": "reports the date isn't covered, no km or time",
+                   "block_id": block, "date": after.isoformat()}],
                  [block])
 
     def abstain(self, agency, question):
         self.add(agency, "abstain", question, [],
-                 [{"type": "phrase_any", "label": "says it can't answer", "phrases": ABSTAIN_PHRASES}])
+                 [{"type": "no_invented_figure", "label": "gives no figure it wasn't given"}])
 
 
 def build():

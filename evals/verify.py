@@ -2,8 +2,12 @@
 
 Three checks, each reported separately:
 - steps: every expected tool was called, with the expected key arguments.
-- end_state: every oracle number appears in the final answer (within rounding), and any
-  required statement is present (a citation, "doesn't run", "can't answer"...).
+- end_state: every oracle number and date appears in the final answer (numbers matched by
+  number_match(), the same function the unsupported check uses; dates by value, in any usual
+  form), and required outcomes are shown structurally, with no accepted-phrase lists:
+  "doesn't run" / "date not covered" = the tool said so and the answer gives no km or time;
+  a citation = the answer names a document search_sources returned; an abstention = every
+  number in the answer is backed by a tool output or the agent's context.
 - unsupported: every number in the answer gets one of three levels:
     supported   - matches a tool output, the question, or the agent's context (tool
                   descriptions, system prompt, source entries), at the answer's own precision;
@@ -15,11 +19,16 @@ Three checks, each reported separately:
                   family, e.g. kWh <-> MWh, minutes <-> hours);
     unsupported - anything else: a failure.
   Dates, years, block IDs, URLs, list markers, small counts (0-10) are ignored.
-A task passes only if every check passes.
+A task passes only if those three checks pass. Reported beside them, not part of the pass:
+- disclosure: when a tool flagged distances as ESTIMATED and blocks as INFERRED (London), the
+  answer says both.
+All text is normalise()d first: Unicode escapes decoded; typographic hyphens, minus signs and
+no-break or thin spaces made plain.
 """
 
 import json
 import re
+from datetime import date
 
 # A number, optionally with thousands separators and a scale word after it. It may follow
 # a multiplication sign ("x1.425") but not other letters, so "CO2" isn't read as 2.
@@ -41,6 +50,18 @@ _URL = re.compile(r"https?://\S+")
 _FIELD_NAME = re.compile(r'"([A-Za-z_]\w*)"\s*:')  # a JSON key, e.g. "block_error_p90_pct":
 _LIST_MARKER = re.compile(r"^\s*\d+[.)]\s", re.MULTILINE)
 SMALL_COUNT = 10  # bare integers up to this are treated as prose ("5 longest", "2 tools")
+# Typographic characters that stand for plain ones: hyphens and the minus sign become "-",
+# no-break and thin spaces become " ". Tool results arrive JSON-escaped ("−"), so escapes
+# are decoded first.
+_PLAIN = str.maketrans({"‐": "-", "‑": "-", "‒": "-", "−": "-",
+                        " ": " ", " ": " ", " ": " ", " ": " ",
+                        " ": " ", " ": " "})
+_ESCAPE = re.compile(r"\\u([0-9a-fA-F]{4})")
+
+
+def normalise(text):
+    """Text with Unicode escapes decoded and typographic hyphens, minus signs and spaces made plain."""
+    return _ESCAPE.sub(lambda m: chr(int(m.group(1), 16)), str(text)).translate(_PLAIN)
 
 
 def parse_numbers(text):
@@ -144,13 +165,26 @@ def _rounding_half_unit(raw, half_unit):
     return half_unit * 10 ** zeros
 
 
+def number_match(value, half_unit, raw, target):
+    """How an answer's number matches a target, for every check alike: "exact" (the target at
+    the answer's own precision), "rounded" (to fewer significant figures: "19,400" for 19,449)
+    or None."""
+    if matches(value, half_unit, target):
+        return "exact"
+    rounded = _rounding_half_unit(raw, half_unit)
+    if rounded is not None and matches(value, rounded, target):
+        return "rounded"
+    return None
+
+
 def tool_numbers(tool_calls):
     """(every number in every tool call's input and result, {number: "percent"/"multiplier"})."""
     numbers, kinds = set(), {}
     for call in tool_calls:
-        for name in _FIELD_NAME.findall(str(call.get("result", ""))):
+        result = normalise(call.get("result", ""))
+        for name in _FIELD_NAME.findall(result):
             numbers.update(float(d) for d in re.findall(r"\d+", name))
-        for text in (json.dumps(call.get("input", {})), str(call.get("result", ""))):
+        for text in (json.dumps(call.get("input", {})), result):
             for value, _, _, family in parse_with_units(_URL.sub(" ", text)):
                 numbers.add(value)
                 if family in ("percent", "multiplier"):
@@ -175,15 +209,20 @@ def check_steps(task, tool_calls):
 
 
 BLOCK_TOOLS = ("get_block_distance", "get_block_duration")
+# What our block tools say when they have no figure: the block doesn't run that day, or the
+# date is outside the timetable they were built from.
+NO_DATA = {"block_not_running": "does not run", "date_not_covered": "is outside the dates available"}
 
 
-def _block_not_running(item, answer, tool_calls, ignore_tokens):
-    """Structural check: a block tool reported the block doesn't run that day, and the answer
-    gives no distance or time figure (no number in km/miles or minutes/hours)."""
+def _no_figure_reported(item, answer, tool_calls, ignore_tokens):
+    """Structural check: a block tool, asked about this block (and date, if given), reported it
+    has no figure, and the answer gives no distance or time (no number in km/miles or
+    minutes/hours)."""
     reported = any(
         call["name"] in BLOCK_TOOLS
         and str(call.get("input", {}).get("block_id", "")) == item["block_id"]
-        and "does not run" in str(call.get("result", ""))
+        and str(call.get("input", {}).get("date", "")) == item.get("date", call.get("input", {}).get("date"))
+        and NO_DATA[item["type"]] in normalise(call.get("result", ""))
         for call in tool_calls
     )
     figures = [raw for _, _, raw, family in parse_with_units(_strip_ignored(answer, ignore_tokens))
@@ -191,23 +230,76 @@ def _block_not_running(item, answer, tool_calls, ignore_tokens):
     return reported and not figures
 
 
-def check_end_state(task, answer, tool_calls=()):
-    """Oracle numbers present (any accepted rendering) and required statements present."""
+_MONTH_NUMBER = {name: i for i, names in enumerate(
+    [("january", "jan"), ("february", "feb"), ("march", "mar"), ("april", "apr"), ("may",),
+     ("june", "jun"), ("july", "jul"), ("august", "aug"), ("september", "sep", "sept"),
+     ("october", "oct"), ("november", "nov"), ("december", "dec")], start=1) for name in names}
+_ISO_DATE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+_DAY_MONTH = re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+({_MONTHS})\b\.?(?:,?\s+(\d{{4}}))?", re.IGNORECASE)
+_MONTH_DAY = re.compile(rf"\b({_MONTHS})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?\b(?:,?\s+(\d{{4}}))?", re.IGNORECASE)
+
+
+def answer_dates(text, default_year):
+    """Every date written in the text, in any of the usual forms; a date without a year is
+    taken to be in default_year."""
+    found = set()
+
+    def add(year, month, day):
+        try:
+            found.add(date(int(year or default_year), month, int(day)))
+        except ValueError:
+            pass
+
+    for y, m, d in _ISO_DATE.findall(text):
+        add(y, int(m), d)
+    for d, month, y in _DAY_MONTH.findall(text):
+        add(y, _MONTH_NUMBER[month.lower()], d)
+    for month, d, y in _MONTH_DAY.findall(text):
+        add(y, _MONTH_NUMBER[month.lower()], d)
+    return found
+
+
+def _cites_source(item, answer, tool_calls):
+    """Structural check: search_sources returned a passage from the document, and the answer
+    names that document by its title, publisher or URL as the tool gave them."""
+    lowered = answer.lower()
+    for call in tool_calls:
+        if call["name"] != "search_sources":
+            continue
+        try:
+            results = json.loads(call.get("result", "")).get("results", [])
+        except (json.JSONDecodeError, AttributeError):
+            continue
+        for hit in results:
+            if hit.get("id", "").startswith(item["doc_id"] + "#") and any(
+                    hit.get(key) and normalise(hit[key]).lower() in lowered
+                    for key in ("title", "publisher", "url")):
+                return True
+    return False
+
+
+def check_end_state(task, answer, tool_calls=(), context=""):
+    """Oracle numbers and dates present, and required outcomes shown structurally."""
+    answer = normalise(answer)
     missing = []
-    numbers = parse_numbers(_strip_ignored(answer, task.get("ignore_tokens", [])))
+    ignore = task.get("ignore_tokens", [])
+    numbers = parse_numbers(_strip_ignored(answer, ignore))
     for item in task.get("oracle", []):
         if item["type"] == "number":
             ok = any(
-                all(any(matches(v, h, target) for v, h, _, _ in numbers) for target in option)
+                all(any(number_match(v, h, raw, target) for v, h, _, raw in numbers) for target in option)
                 for option in item["accept"]
             )
-        elif item["type"] == "phrase_any":
-            lowered = answer.lower()
-            ok = any(p.lower() in lowered for p in item["phrases"])
-        elif item["type"] == "date_any":
-            ok = any(d.lower() in answer.lower() for d in item["renderings"])
-        elif item["type"] == "block_not_running":
-            ok = _block_not_running(item, answer, tool_calls, task.get("ignore_tokens", []))
+        elif item["type"] == "date":
+            target = date.fromisoformat(item["date"])
+            ok = target in answer_dates(answer, target.year)
+        elif item["type"] in NO_DATA:
+            ok = _no_figure_reported(item, answer, tool_calls, ignore)
+        elif item["type"] == "cites_source":
+            ok = _cites_source(item, answer, tool_calls)
+        elif item["type"] == "no_invented_figure":
+            # Abstention: every number given is backed by a tool output or the agent's context.
+            ok = check_unsupported(task, answer, tool_calls, context)["pass"]
         else:
             raise ValueError(f"unknown oracle type {item['type']}")
         if not ok:
@@ -217,14 +309,13 @@ def check_end_state(task, answer, tool_calls=()):
 
 def classify(value, half_unit, raw, family, supported, kinds=None):
     """("supported", None, None), ("derived", rule, source number) or ("unsupported", None, None)."""
-    if any(matches(value, half_unit, t) for t in supported):
+    levels = {t: number_match(value, half_unit, raw, t) for t in supported}
+    if "exact" in levels.values():
         return "supported", None, None
-    rounded = _rounding_half_unit(raw, half_unit)
-    if rounded is not None:
-        source = next((t for t in supported if matches(value, rounded, t)), None)
-        if source is not None:
-            return "derived", "rounding to fewer significant figures", source
-    tolerance = rounded or half_unit
+    source = next((t for t, level in levels.items() if level == "rounded"), None)
+    if source is not None:
+        return "derived", "rounding to fewer significant figures", source
+    tolerance = _rounding_half_unit(raw, half_unit) or half_unit
     for t in sorted(supported):
         for rule, candidate in _derivations(t, (kinds or {}).get(t), family):
             if matches(value, tolerance, candidate):
@@ -238,14 +329,14 @@ def check_unsupported(task, answer, tool_calls, context=""):
     context: the agent's tool descriptions, system prompt and source entries; numbers stated
     there count as supported."""
     supported, kinds = tool_numbers(tool_calls)
-    for text in (_strip_ignored(task["question"]), _URL.sub(" ", context)):
+    for text in (_strip_ignored(normalise(task["question"])), _URL.sub(" ", normalise(context))):
         for value, _, _, family in parse_with_units(text):
             supported.add(value)
             if family in ("percent", "multiplier"):
                 kinds[value] = family
     unsupported, derived = [], []
     for value, half_unit, raw, family in parse_with_units(
-            _strip_ignored(answer, task.get("ignore_tokens", []))):
+            _strip_ignored(normalise(answer), task.get("ignore_tokens", []))):
         if value.is_integer() and 0 <= value <= SMALL_COUNT and half_unit <= 0.5:
             continue
         if 1900 <= value <= 2100 and value.is_integer():
@@ -258,17 +349,32 @@ def check_unsupported(task, answer, tool_calls, context=""):
     return {"pass": not unsupported, "numbers": unsupported, "derived": derived}
 
 
+def check_disclosure(answer, tool_calls):
+    """When a tool flagged its distances as ESTIMATED and its blocks as INFERRED (London), the
+    answer must say both: a word starting "estimat" and one starting "infer". Otherwise the
+    check doesn't apply. Reported separately; not part of a task's pass."""
+    flagged = [normalise(call.get("result", "")) for call in tool_calls]
+    applies = any("ESTIMATED" in r for r in flagged) and any("INFERRED" in r for r in flagged)
+    if not applies:
+        return {"applies": False, "pass": True}
+    lowered = normalise(answer).lower()
+    missing = [word for word in ("estimat", "infer") if not re.search(rf"\b{word}", lowered)]
+    return {"applies": True, "pass": not missing, "missing": missing}
+
+
 def verify(task, result, context=""):
     """All checks for one run. result: {"answer", "tool_calls"} (or {"error"} if the run failed).
-    context: the agent's tool descriptions, system prompt and source entries for this agency."""
+    context: the agent's tool descriptions, system prompt and source entries for this agency.
+    pass covers steps, end_state and unsupported; disclosure is reported beside them."""
     if result.get("error"):
         failed = {"pass": False, "error": result["error"]}
-        return {"steps": failed, "end_state": failed, "unsupported": failed, "pass": False}
+        return {"steps": failed, "end_state": failed, "unsupported": failed,
+                "disclosure": {"applies": False, "pass": True}, "pass": False}
     checks = {
         "steps": check_steps(task, result["tool_calls"]),
-        "end_state": check_end_state(task, result["answer"], result["tool_calls"]),
+        "end_state": check_end_state(task, result["answer"], result["tool_calls"], context),
         "unsupported": check_unsupported(task, result["answer"], result["tool_calls"], context),
     }
     checks["pass"] = all(c["pass"] for c in checks.values())
+    checks["disclosure"] = check_disclosure(result["answer"], result["tool_calls"])
     return checks
-

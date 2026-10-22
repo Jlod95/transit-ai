@@ -1,6 +1,6 @@
 """The eval verifier on hand-written fake answers, so it is itself tested before it grades."""
 
-from evals.verify import check_unsupported, parse_numbers, verify
+from evals.verify import check_disclosure, check_end_state, check_unsupported, parse_numbers, verify
 
 TASK = {
     "id": "fake-block_both",
@@ -83,15 +83,15 @@ def test_dates_years_block_ids_and_small_counts_are_ignored():
     assert check_unsupported(task, answer, [])["numbers"] == []
 
 
-def test_abstention_passes_without_numbers():
+def test_abstention_passes_without_invented_numbers():
     task = {"id": "fake-abstain", "question": "How much does a driver earn per hour?",
             "expected_calls": [],
-            "oracle": [{"type": "phrase_any", "label": "says it can't answer",
-                        "phrases": ["don't have", "can't"]}]}
-    good = verify(task, {"answer": "I don't have wage data, so I can't answer that.", "tool_calls": []})
+            "oracle": [{"type": "no_invented_figure", "label": "gives no figure it wasn't given"}]}
+    # Any wording passes, as long as no figure is made up.
+    good = verify(task, {"answer": "Wages aren't something the timetable data covers.", "tool_calls": []})
     assert good["pass"]
     invented = verify(task, {"answer": "I don't have exact data, but about $32 an hour.", "tool_calls": []})
-    assert invented["unsupported"]["numbers"] == ["32"] and not invented["pass"]
+    assert not invented["end_state"]["pass"] and invented["unsupported"]["numbers"] == ["32"]
 
 
 # --- Number levels: supported, derived (warning) and unsupported (fail) ---
@@ -175,3 +175,68 @@ def test_digits_in_tool_field_names_are_supported():
     # Only field names count: the same digits in a value or free text do not.
     other = {**call, "result": "Error at p90 is 12.4% for 512 blocks."}
     assert check_unsupported(COST_TASK, answer, [other])["numbers"] == ["90"]
+
+
+# --- eval-v1.2: structural checks, Unicode normalisation, one number match, disclosure ---
+
+OUTSIDE = {"id": "fake-outside", "question": "How far does block 711399 drive on 6 February 2027?",
+           "expected_calls": [], "ignore_tokens": ["711399"],
+           "oracle": [{"type": "date_not_covered", "label": "date not covered",
+                       "block_id": "711399", "date": "2027-02-06"}]}
+OUTSIDE_CALL = {"name": "get_block_distance",
+                "input": {"agency": "halifax", "block_id": "711399", "date": "2027-02-06"},
+                "result": "2027-02-06 is outside the dates available for Halifax Transit: "
+                          "2026-08-24 to 2026-11-29 (whole timetable)."}
+
+
+def test_outside_timetable_is_checked_structurally():
+    worded = "That date isn't in the timetable, which only runs from 24 August to 29 November 2026."
+    assert check_end_state(OUTSIDE, worded, [OUTSIDE_CALL])["pass"]
+    assert not check_end_state(OUTSIDE, worded, [])["pass"]  # the tool wasn't asked
+    guessed = "That date isn't covered, but it probably drives about 150 km."
+    assert not check_end_state(OUTSIDE, guessed, [OUTSIDE_CALL])["pass"]
+
+
+def test_citation_is_checked_against_the_tool_output():
+    task = {"id": "fake-source", "question": "What do sources say?", "expected_calls": [],
+            "oracle": [{"type": "cites_source", "label": "cites", "doc_id": "tfl_plan"}]}
+    call = {"name": "search_sources", "input": {"query": "zero emission"},
+            "result": '{"results": [{"id": "tfl_plan#3", "title": "Bus action plan", '
+                      '"publisher": "Transport for London", "url": "https://tfl.gov.uk/plan.pdf"}]}'}
+    assert check_end_state(task, "TfL's *Bus action plan* says 2034.", [call])["pass"]
+    assert check_end_state(task, "See https://tfl.gov.uk/plan.pdf", [call])["pass"]
+    assert not check_end_state(task, "Transport for London says 2034.", [])["pass"]
+
+
+def test_dates_are_matched_by_value_in_any_form():
+    task = {"id": "fake-date", "question": "Which day?", "expected_calls": [],
+            "oracle": [{"type": "date", "label": "design day", "date": "2026-08-24"}]}
+    for answer in ("Plan around 2026-08-24.", "Plan around August 24.", "Plan around 24 Aug 2026."):
+        assert check_end_state(task, answer, [])["pass"], answer
+    assert not check_end_state(task, "Plan around 2026-08-25.", [])["pass"]
+
+
+def test_unicode_is_normalised_before_parsing():
+    task = {"id": "fake-date", "question": "Which day?", "expected_calls": [],
+            "oracle": [{"type": "date", "label": "design day", "date": "2026-08-24"}]}
+    assert check_end_state(task, "Plan around 2026‑08‑24.", [])["pass"]  # no-break hyphens
+    # A JSON-escaped minus sign in a tool result supports a plain minus in the answer.
+    call = {"name": "search_sources", "input": {}, "result": '{"text": "at \u221212 \u00b0C"}'}
+    assert check_unsupported(COST_TASK, "Consumption rises at −12 °C.", [call])["pass"]
+
+
+def test_end_state_and_unsupported_share_rounding_tolerance():
+    task = {**COST_TASK, "oracle": [{"type": "number", "label": "CO2", "accept": [[19449.0]]}]}
+    answer = "It saves about 19,400 tonnes of CO2 a year."
+    assert check_end_state(task, answer, [COST_CALL])["pass"]
+    assert check_unsupported(task, answer, [COST_CALL])["derived"][0]["number"] == "19,400"
+    assert not check_end_state(task, "It saves about 18,000 tonnes.", [COST_CALL])["pass"]
+
+
+def test_disclosure_needed_only_when_tools_flag_estimates():
+    london = [{"name": "get_block_distance", "input": {},
+               "result": "Block 79-6 drives 201.5 revenue km. [distance ESTIMATED ...; block INFERRED ...]"}]
+    assert check_disclosure("It drives an estimated 201.5 km; the block is inferred.", london)["pass"]
+    result = check_disclosure("It drives 201.5 km (an estimate).", london)
+    assert not result["pass"] and result["missing"] == ["infer"]
+    assert check_disclosure("It drives 80.5 km.", [DISTANCE]) == {"applies": False, "pass": True}
