@@ -18,7 +18,7 @@ COPY data/summaries/ data/summaries/
 # run time the app works offline: HF_HUB_OFFLINE stops any attempt to fetch the model again.
 COPY data/index/ data/index/
 ENV MODEL_DIR=data/models HF_HUB_DISABLE_TELEMETRY=1
-RUN python -c "from src.sources import embedder; embedder()" && du -sh data/models
+RUN python -c "from src.sources import embedder; embedder()" && chmod -R a+rX data/models
 ENV HF_HUB_OFFLINE=1
 
 # Create an unprivileged user and run the app as that user instead of root.
