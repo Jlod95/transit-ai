@@ -13,6 +13,14 @@ COPY static/ static/
 # and its stamp records exactly which feed and code produced it.
 COPY data/summaries/ data/summaries/
 
+# Public-sources index (built locally with scripts/build_source_index.py, committed), and the
+# small embedding model it needs to embed questions, downloaded once here at build time. At
+# run time the app works offline: HF_HUB_OFFLINE stops any attempt to fetch the model again.
+COPY data/index/ data/index/
+ENV MODEL_DIR=data/models HF_HUB_DISABLE_TELEMETRY=1
+RUN python -c "from src.sources import embedder; embedder()" && du -sh data/models
+ENV HF_HUB_OFFLINE=1
+
 # Create an unprivileged user and run the app as that user instead of root.
 RUN useradd --create-home --uid 1000 appuser
 USER appuser

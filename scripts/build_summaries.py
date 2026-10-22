@@ -12,8 +12,6 @@ has uncommitted changes.
 """
 
 import argparse
-import os
-import subprocess
 import sys
 import time
 from datetime import UTC, datetime
@@ -23,26 +21,8 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))  # so "src" can be imported when run as a script
 
 from src.agencies import AGENCIES, get_agency
+from src.provenance import current_git_commit
 from src.summaries import build_summary, calibrate_road_factor, write_summary
-
-
-def current_git_commit():
-    if os.environ.get("GIT_COMMIT"):
-        return os.environ["GIT_COMMIT"]
-    try:
-        def git(*args):
-            return subprocess.run(
-                ["git", *args], cwd=PROJECT_ROOT, capture_output=True, text=True, check=True
-            ).stdout.strip()
-
-        commit = git("rev-parse", "--short", "HEAD")
-        # "-dirty" means tracked code differs from the commit. Summaries are this script's own
-        # output, so changes to them don't count.
-        changed = git("status", "--porcelain", "--untracked-files=no", "--", ".",
-                      ":(exclude)data/summaries")
-        return commit + ("-dirty" if changed else "")
-    except (OSError, subprocess.CalledProcessError):
-        return "unknown"
 
 
 def build(key, out_dir, commit):
