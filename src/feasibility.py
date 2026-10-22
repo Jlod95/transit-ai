@@ -54,6 +54,7 @@ def assess_distances(distances: dict[str, float], season: str, **overrides) -> d
         "within_range": within,
         "exceeding_range": total - within,
         "pct_within_range": round(100 * within / total, 1) if total else 0.0,
+        "pct_exceeding_range": round(100 * (total - within) / total, 1) if total else 0.0,
         "longest_blocks": [{"block_id": b, "km": round(km, 1)} for b, km in longest],
         "assumptions": used,
     }

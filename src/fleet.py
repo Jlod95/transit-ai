@@ -64,6 +64,7 @@ def fleet_size(summary, season, **overrides):
         "blocks_in_service": len(group["blocks"]),
         "buses_needed_today": today,
         "blocks_over_range": over,
+        "pct_over_range": round(100 * over / len(group["blocks"]), 1),
         "electric_buses_needed": electric,
         "replacement_ratio": round(electric / today, 3) if today else None,
         "benchmark_ratio": _setting("replacement_ratio_benchmark", overrides),

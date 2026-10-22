@@ -92,3 +92,59 @@ def test_abstention_passes_without_numbers():
     assert good["pass"]
     invented = verify(task, {"answer": "I don't have exact data, but about $32 an hour.", "tool_calls": []})
     assert invented["unsupported"]["numbers"] == ["32"] and not invented["pass"]
+
+
+# --- Number levels: supported, derived (warning) and unsupported (fail) ---
+
+COST_TASK = {"id": "fake-cost", "question": "What would electrifying cost, and what CO2 would it save?",
+             "expected_calls": [], "oracle": []}
+COST_CALL = {"name": "get_cost_and_co2", "input": {"agency": "halifax", "season": "winter"},
+             "result": '{"capital_cost": 653705013, "annual_energy_saving": 8288042, '
+                       '"annual_co2_saved_tonnes": 19449.0, "pct_within_range": 71.8, '
+                       '"duration_minutes": 530}'}
+
+
+def levels(answer, context=""):
+    return check_unsupported(COST_TASK, answer, [COST_CALL], context)
+
+
+def test_rounding_to_fewer_significant_figures_is_derived():
+    result = levels("It saves about 19,400 tonnes of CO2 a year.")
+    assert result["pass"] and result["numbers"] == []
+    assert result["derived"] == [{"number": "19,400", "rule": "rounding to fewer significant figures",
+                                  "from": 19449.0}]
+
+
+def test_multiplier_as_percent_is_derived():
+    # 1.425 (stated in the agent's context) -> "42.5%" more.
+    result = levels("Winter use is 42.5% higher.", context="winter energy = summer x1.425")
+    assert result["pass"]
+    assert result["derived"][0]["number"] == "42.5" and result["derived"][0]["from"] == 1.425
+
+
+def test_complement_to_100_percent_is_derived():
+    result = levels("71.8% fit, so 28.2% don't.")
+    assert result["pass"]
+    assert [(d["number"], d["rule"]) for d in result["derived"]] == [("28.2", "complement to 100%")]
+
+
+def test_unit_conversion_is_derived():
+    result = levels("The block runs for 8.8 hours.")  # 530 minutes / 60
+    assert result["pass"] and result["derived"][0]["rule"] == "unit conversion"
+
+
+def test_payback_ratio_is_still_unsupported():
+    # 654 million / 8.3 million a year = 79 years: a calculation, not one general rule.
+    result = levels("It costs CAD 654 million and saves 8.3 million a year: a 79-year payback.")
+    assert result["numbers"] == ["79"]
+    assert not result["pass"]
+
+
+def test_outside_fact_is_still_unsupported():
+    result = levels("Drivers are covered by ATU Local 508.")
+    assert result["numbers"] == ["508"] and not result["pass"]
+
+
+def test_numbers_in_the_agent_context_are_supported():
+    result = levels("The battery is 400 kWh.", context="Toronto-trial battery (400 kWh, 71.25% usable)")
+    assert result["pass"] and result["derived"] == []

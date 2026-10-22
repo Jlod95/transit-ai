@@ -130,3 +130,8 @@ def test_winter_energy_cites_both_sources(summary):
     summer = fleet_size(summary, "summer")["assumptions"]["sources"]["kwh_per_km"]
     assert summer["pages"] == "55"
     assert summer["url"].startswith("https://www.ttc.ca/")
+
+
+def test_shares_over_range_are_returned(summary):
+    # Tiny battery: B (30 km) is over the 25 km range, A (25 km) fits: 1 of 2 = 50% over.
+    assert fleet_size(summary, "winter", **TINY_BATTERY)["pct_over_range"] == 50.0

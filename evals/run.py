@@ -24,8 +24,10 @@ sys.path.insert(0, str(ROOT))
 
 import anthropic
 
+from config.assumptions import ASSUMPTION_SOURCES
+from config.sources import FACT_CARDS
 from evals.verify import verify
-from src.agent import MODEL, AgentError, answer_question
+from src.agent import MODEL, TOOLS, AgentError, answer_question, system_prompt
 from src.provenance import current_git_commit
 
 TASKS = Path(__file__).parent / "tasks.jsonl"
@@ -47,12 +49,21 @@ def load_tasks(split, ids):
     return [t for t in tasks if split == "all" or t["split"] == split]
 
 
+def agent_context(agency):
+    """What the agent is told besides tool results: its system prompt, every tool description,
+    and the source entries. Numbers stated here count as supported when grading."""
+    parts = [system_prompt(agency)] + [t["description"] for t in TOOLS]
+    parts.append(json.dumps(ASSUMPTION_SOURCES))
+    parts += [text for _, _, text in FACT_CARDS]
+    return "\n".join(parts)
+
+
 def cost(usage):
     price_in, price_out = PRICE_PER_MTOK[MODEL]
     return (usage["input_tokens"] * price_in + usage["output_tokens"] * price_out) / 1e6
 
 
-def run(tasks, k):
+def run(tasks, k, contexts):
     records = []
     for task in tasks:
         for attempt in range(1, k + 1):
@@ -64,7 +75,7 @@ def run(tasks, k):
             except (AgentError, anthropic.APIError, ValueError) as e:  # a failed attempt, not a crash
                 result = {"error": f"{type(e).__name__}: {e}"}
                 usage = {"input_tokens": 0, "output_tokens": 0}
-            checks = verify(task, result)
+            checks = verify(task, result, contexts[task["agency"]])
             records.append({
                 "task_id": task["id"], "agency": task["agency"], "category": task["category"],
                 "attempt": attempt, "pass": checks["pass"], "checks": checks,
@@ -106,12 +117,29 @@ def report(stamp_, records):
         n = sum(r["checks"][check]["pass"] for r in records)
         lines.append(f"| {check} | {n}/{len(records)} |")
 
-    lines += ["", "## By category", "", "| Category | Passed |", "|---|---|"]
-    by_category = defaultdict(list)
+    # Per task: pass@k = at least one of its k attempts passed; pass^k = all k passed.
+    by_task = defaultdict(list)
     for r in records:
-        by_category[r["category"]].append(r["pass"])
-    for category, results in sorted(by_category.items()):
-        lines.append(f"| {category} | {sum(results)}/{len(results)} |")
+        by_task[(r["category"], r["task_id"])].append(r["pass"])
+    by_category = defaultdict(list)
+    for (category, _), results in by_task.items():
+        by_category[category].append(results)
+    k = stamp_["k"]
+    lines += ["", "## By category", "",
+              f"| Category | Attempts passed | pass@{k} (tasks) | pass^{k} (tasks) |", "|---|---|---|---|"]
+    for category, tasks in sorted(by_category.items()):
+        attempts = [p for results in tasks for p in results]
+        lines.append(f"| {category} | {sum(attempts)}/{len(attempts)} | "
+                     f"{sum(any(t) for t in tasks)}/{len(tasks)} | {sum(all(t) for t in tasks)}/{len(tasks)} |")
+    all_tasks = [t for tasks in by_category.values() for t in tasks]
+    lines.append(f"| **all** | {sum(r['pass'] for r in records)}/{len(records)} | "
+                 f"{sum(any(t) for t in all_tasks)}/{len(all_tasks)} | "
+                 f"{sum(all(t) for t in all_tasks)}/{len(all_tasks)} |")
+
+    derived = [(r, d) for r in records for d in r["checks"]["unsupported"].get("derived", [])]
+    lines += ["", f"## Derived numbers (warnings, not failures): {len(derived)}", ""]
+    lines += [f"- `{r['task_id']}` #{r['attempt']}: {d['number']} ({d['rule']}, from {d['from']:g})"
+              for r, d in derived]
 
     lines += ["", "## Failures by check type", ""]
     for check in CHECKS:
@@ -145,12 +173,14 @@ def main():
     tasks = load_tasks(args.split, ids)
     print(f"Running {len(tasks)} tasks x k={args.k} on {MODEL}")
     stamp_ = stamp(args.split, args.k, ids)
-    records = run(tasks, args.k)
+    contexts = {agency: agent_context(agency) for agency in sorted({t["agency"] for t in tasks})}
+    records = run(tasks, args.k, contexts)
 
     RESULTS.mkdir(exist_ok=True)
     name = f"{stamp_['timestamp'].replace(':', '').replace('-', '')}-{stamp_['split']}-k{args.k}"
     (RESULTS / f"{name}.json").write_text(
-        json.dumps({"stamp": stamp_, "records": records}, indent=1) + "\n", encoding="utf-8", newline="\n")
+        json.dumps({"stamp": stamp_, "contexts": contexts, "records": records}, indent=1) + "\n",
+        encoding="utf-8", newline="\n")
     (RESULTS / f"{name}.md").write_text(report(stamp_, records), encoding="utf-8", newline="\n")
     passed = sum(r["pass"] for r in records)
     print(f"Pass {passed}/{len(records)}; cost ${sum(r['cost_usd'] for r in records):.2f}; "

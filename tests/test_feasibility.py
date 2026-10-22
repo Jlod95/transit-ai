@@ -52,3 +52,12 @@ def test_uses_config_assumptions_by_default(mini_feed):
 def test_unknown_season_is_rejected(mini_feed):
     with pytest.raises(ValueError):
         fleet_feasibility(mini_feed, WEEKDAY, "spring")
+
+
+def test_feasibility_returns_the_share_over_range(mini_feed):
+    # Range 25 km: A (25 km) fits, B (30 km) doesn't: 50% within, 50% over.
+    result = fleet_feasibility(
+        mini_feed, WEEKDAY, "winter",
+        nominal_battery_kwh=100, usable_fraction=0.5, kwh_per_km={"winter": 2.0},
+    )
+    assert (result["pct_within_range"], result["pct_exceeding_range"]) == (50.0, 50.0)
