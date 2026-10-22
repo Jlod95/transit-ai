@@ -166,8 +166,8 @@ def _block_distances(trip_block, lengths):
     return dict(block_distance)
 
 
-def _block_durations(trip_block, starts, ends):
-    """Minutes from each block's first departure to its last arrival.
+def _block_spans(trip_block, starts, ends):
+    """{block_id: (first departure, last arrival)} in seconds after the service day's midnight.
 
     Times within a block only move forward, so the earliest departure and the latest
     arrival across its trips are the first trip's start and the last trip's end.
@@ -178,7 +178,12 @@ def _block_durations(trip_block, starts, ends):
             block_start[block_id] = min(block_start.get(block_id, starts[trip_id]), starts[trip_id])
         if trip_id in ends:
             block_end[block_id] = max(block_end.get(block_id, ends[trip_id]), ends[trip_id])
-    return {b: (block_end[b] - block_start[b]) / 60 for b in block_start}
+    return {b: (block_start[b], block_end[b]) for b in block_start}
+
+
+def _block_durations(trip_block, starts, ends):
+    """Minutes from each block's first departure to its last arrival."""
+    return {b: (end - start) / 60 for b, (start, end) in _block_spans(trip_block, starts, ends).items()}
 
 
 def gtfs_time_to_seconds(text):

@@ -25,6 +25,7 @@ from src.blocks import (
     daily_block_duration,
 )
 from src.feasibility import assess_distances, range_km_for
+from src.fleet import charging_needs, cost_and_co2, fleet_size
 from src.summaries import design_day, load_summary, service_day_for
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -45,7 +46,9 @@ def system_prompt(agency_key):
         "tool. Use the tools for block distances and service times rather than guessing. "
         "For battery size, energy use and range, use only the numbers returned by "
         "get_fleet_feasibility or get_design_day, not your own estimates, and say clearly that "
-        "these are placeholder assumptions that have not yet been sourced. When a tool result "
+        "these are placeholder assumptions that have not yet been sourced. Fleet size, charging, "
+        "cost and CO2 figures from get_fleet_size, get_charging_needs and get_cost_and_co2 are "
+        "crude: give the method and placeholder prices they report. When a tool result "
         "says distances are ESTIMATED or blocks are INFERRED, say so plainly in your answer and "
         "treat those figures as approximate. When a result includes a data_snapshot, mention "
         "which feed version the figures come from."
@@ -153,6 +156,53 @@ TOOLS = [
             "required": ["agency", "season"],
             "additionalProperties": False,
         },
+        "strict": True,
+    },
+]
+
+AGENCY_SEASON_SCHEMA = {
+    "type": "object",
+    "properties": {"agency": AGENCY_PROPERTY, "season": SEASON_PROPERTY},
+    "required": ["agency", "season"],
+    "additionalProperties": False,
+}
+
+TOOLS += [
+    {
+        "name": "get_fleet_size",
+        "description": (
+            "FLEET SIZE: how many buses the selected agency needs on its design day today, and "
+            "how many if electric. Buses today = the most blocks in service at the same moment; "
+            "each block over one charge's range needs one extra bus. Returns both counts, the "
+            "replacement ratio (electric / today) and a 1:1.2 benchmark to compare with. Use "
+            "for questions about how many electric buses are needed or the replacement ratio. "
+            "Crude: no spare buses, placeholder battery figures."
+        ),
+        "input_schema": AGENCY_SEASON_SCHEMA,
+        "strict": True,
+    },
+    {
+        "name": "get_charging_needs",
+        "description": (
+            "CHARGING: the overnight energy (kWh/MWh) the selected agency's fleet needs after its "
+            "design day (sum of block km x kWh per km), and the peak depot power (kW/MW) if every "
+            "bus charges within a fixed overnight window (a placeholder number of hours). Use for "
+            "questions about depot power, grid connection or energy per night. Crude: revenue km "
+            "only, placeholder consumption."
+        ),
+        "input_schema": AGENCY_SEASON_SCHEMA,
+        "strict": True,
+    },
+    {
+        "name": "get_cost_and_co2",
+        "description": (
+            "COST AND CO2: a crude capital cost for the selected agency (extra buses and depot "
+            "chargers x placeholder prices), the annual energy cost electric versus diesel, and "
+            "the annual CO2 saved by not burning diesel. Annual km = design-day km x a "
+            "placeholder number of service days. Use for questions about cost, savings, payback "
+            "or emissions. Every price and factor is a placeholder; one currency for all agencies."
+        ),
+        "input_schema": AGENCY_SEASON_SCHEMA,
         "strict": True,
     },
 ]
@@ -301,6 +351,26 @@ def get_design_day(season, agency=DEFAULT_AGENCY):
     )
 
 
+def _summary_judgement(compute, agency, season):
+    """Run a fleet/charging/cost function on the agency's summary and add the data snapshot."""
+    summary = summary_for(agency)
+    if summary is None:
+        return f"No pre-built summary is available for {get_agency(agency).name}."
+    return json.dumps({**compute(summary, season), "data_snapshot": snapshot(summary)})
+
+
+def get_fleet_size(season, agency=DEFAULT_AGENCY):
+    return _summary_judgement(fleet_size, agency, season)
+
+
+def get_charging_needs(season, agency=DEFAULT_AGENCY):
+    return _summary_judgement(charging_needs, agency, season)
+
+
+def get_cost_and_co2(season, agency=DEFAULT_AGENCY):
+    return _summary_judgement(cost_and_co2, agency, season)
+
+
 # Each tool name, and how to call its Python function with Claude's inputs.
 TOOL_FUNCTIONS = {
     "get_block_distance": lambda i: get_block_distance(
@@ -310,6 +380,9 @@ TOOL_FUNCTIONS = {
     "get_fleet_feasibility": lambda i: get_fleet_feasibility(
         i["date"], i["season"], i.get("agency", DEFAULT_AGENCY)),
     "get_design_day": lambda i: get_design_day(i["season"], i.get("agency", DEFAULT_AGENCY)),
+    "get_fleet_size": lambda i: get_fleet_size(i["season"], i.get("agency", DEFAULT_AGENCY)),
+    "get_charging_needs": lambda i: get_charging_needs(i["season"], i.get("agency", DEFAULT_AGENCY)),
+    "get_cost_and_co2": lambda i: get_cost_and_co2(i["season"], i.get("agency", DEFAULT_AGENCY)),
 }
 
 

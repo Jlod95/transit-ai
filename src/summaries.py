@@ -20,7 +20,7 @@ from src.agencies import BLOCK_METHODS, DISTANCE_METHODS
 from src.blocks import (
     MissingDistanceError,
     _block_distances,
-    _block_durations,
+    _block_spans,
     _blocks_for_services,
     _bus_trips,
     _load_calendar,
@@ -214,9 +214,16 @@ class _FeedPart:
         else:
             raise ValueError(f"Unknown block method {self.blocks_method!r}")
         distances = _block_distances(trip_block, self.lengths)
-        durations = _block_durations(trip_block, self.starts, self.ends)
+        spans = _block_spans(trip_block, self.starts, self.ends)
+        # start/end: seconds after the service day's midnight (can pass 24:00 for late blocks).
         return {
-            b: {"km": round(distances[b], 3), "minutes": round(durations[b], 1)} for b in distances
+            b: {
+                "km": round(distances[b], 3),
+                "minutes": round((spans[b][1] - spans[b][0]) / 60, 1),
+                "start": spans[b][0],
+                "end": spans[b][1],
+            }
+            for b in distances
         }
 
 

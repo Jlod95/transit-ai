@@ -29,9 +29,10 @@ def test_one_service_day_with_both_blocks(summary):
     assert "2026-10-12" not in day["dates"]  # the calendar_dates exception
     assert "2026-10-17" not in day["dates"]  # a Saturday
     # Distances and durations, not pass/fail. Ferry block C is not a bus, so it's absent.
+    # start/end are seconds after midnight: A 06:00-07:40, B 08:00-09:45.
     assert day["blocks"] == {
-        "A": {"km": 25.0, "minutes": 100.0},
-        "B": {"km": 30.0, "minutes": 105.0},
+        "A": {"km": 25.0, "minutes": 100.0, "start": 21_600, "end": 27_600},
+        "B": {"km": 30.0, "minutes": 105.0, "start": 28_800, "end": 35_100},
     }
 
 
@@ -147,3 +148,14 @@ def test_no_summary_and_no_feed_is_an_error(monkeypatch, tmp_path):
     monkeypatch.setattr(agent, "HALIFAX_FEED", tmp_path / "no_feed.zip")
     with pytest.raises(agent.AgentError, match="No block data"):
         agent.check_block_data()
+
+
+def test_fleet_charging_and_cost_tools_read_the_summary(agent_using_summary):
+    run = agent_using_summary.run_tool
+    fleet = json.loads(run("get_fleet_size", {"agency": "halifax", "season": "winter"})[0])
+    assert fleet["buses_needed_today"] == 1 and fleet["electric_buses_needed"] == 1
+    charging = json.loads(run("get_charging_needs", {"agency": "halifax", "season": "winter"})[0])
+    assert charging["daily_km"] == 55.0
+    cost = json.loads(run("get_cost_and_co2", {"agency": "halifax", "season": "winter"})[0])
+    assert cost["annual_km"] == 55 * cost["assumptions"]["annual_service_days"]
+    assert cost["data_snapshot"]["agency"] == "Halifax Transit"
