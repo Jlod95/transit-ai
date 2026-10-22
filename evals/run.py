@@ -5,6 +5,7 @@ Usage:
     python evals/run.py --split heldout --k 5
     python evals/run.py --ids halifax-01-block_distance,halifax-06-design_day
     python evals/run.py --split dev --k 5 --model claude-sonnet-5-5 --concurrency 5
+    python evals/run.py --split all --k 3 --model openrouter:deepseek/deepseek-v4.1-flash
 
 Calls answer_question directly (not over HTTP, so the /ask rate limits don't apply); every
 attempt is a real, paid API call. Writes evals/results/<time>-<split>-k<k>.json (every answer,
@@ -31,6 +32,7 @@ from config.sources import FACT_CARDS
 from evals.verify import verify
 from src.agent import MODEL, TOOLS, AgentError, answer_question, system_prompt
 from src.provenance import current_git_commit
+from src.providers import ProviderError
 
 TASKS = Path(__file__).parent / "tasks.jsonl"
 RESULTS = Path(__file__).parent / "results"
@@ -68,7 +70,10 @@ def agent_context(agency):
 
 
 def cost(usage, model):
-    """US$ for the tokens used, or None if the model's price isn't listed."""
+    """US$ for the tokens used: as reported by the provider (OpenRouter) if it did, else from
+    PRICE_PER_MTOK, else None (unknown)."""
+    if usage.get("cost_usd") is not None:
+        return round(usage["cost_usd"], 4)
     if model not in PRICE_PER_MTOK:
         return None
     price_in, price_out = PRICE_PER_MTOK[model]
@@ -82,7 +87,7 @@ def attempt_once(task, attempt, context, model):
         out = answer_question(task["question"], task["agency"], model=model)
         result = {"answer": out["answer"], "tool_calls": out["tool_calls"]}
         usage = out["usage"]
-    except (AgentError, anthropic.APIError, ValueError) as e:  # a failed attempt, not a crash
+    except (AgentError, anthropic.APIError, ProviderError, ValueError) as e:  # a failed attempt, not a crash
         result = {"error": f"{type(e).__name__}: {e}"}
         usage = {"input_tokens": 0, "output_tokens": 0}
     checks = verify(task, result, context)
@@ -187,7 +192,7 @@ def main():
     parser.add_argument("--split", choices=["dev", "heldout", "all"], default="dev")
     parser.add_argument("--k", type=int, default=1, help="attempts per task")
     parser.add_argument("--ids", default="", help="comma-separated task ids (overrides --split)")
-    parser.add_argument("--model", default=MODEL, help=f"any Anthropic model ID (default {MODEL})")
+    parser.add_argument("--model", default=MODEL, help=f"an Anthropic model ID or openrouter:<model-id> (default {MODEL})")
     parser.add_argument("--concurrency", type=int, default=5, help="attempts run in parallel")
     args = parser.parse_args()
     ids = [i for i in args.ids.split(",") if i]

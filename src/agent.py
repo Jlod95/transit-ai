@@ -1,9 +1,9 @@
-"""The Transit AI agent: answers a question with Claude, using our block and fleet
+"""The Transit AI agent: answers a question with a model (Claude by default), using our block and fleet
 feasibility code as tools.
 
 answer_question() runs the tool-use loop and returns the answer plus every tool call made.
 It is used by scripts/ask_blocks.py (command line) and the POST /ask endpoint in main.py.
-Reads ANTHROPIC_API_KEY from the environment or the project's .env file. Block figures come
+Reads ANTHROPIC_API_KEY (or OPENROUTER_API_KEY) from the environment or the project's .env file. Block figures come
 from each agency's pre-built summary in SUMMARY_DIR (default data/summaries). For local
 development only, Halifax falls back to its raw feed at FEED_PATH (default
 data/raw/halifax.zip) when no summary exists. Paths are relative to the project root.
@@ -14,7 +14,6 @@ import os
 from datetime import date
 from pathlib import Path
 
-import anthropic
 from dotenv import load_dotenv
 
 from src.agencies import AGENCIES, DEFAULT_AGENCY, get_agency
@@ -26,14 +25,13 @@ from src.blocks import (
 )
 from src.feasibility import assess_distances, range_km_for
 from src.fleet import charging_needs, cost_and_co2, fleet_size
+from src.providers import complete, key_name
 from src.sources import load_index, search
 from src.summaries import design_day, load_summary, service_day_for
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
 MODEL = "claude-opus-5-5"
-# Models that accept the server-side refusal fallback in "default" mode.
-FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
 SUMMARY_DIR = PROJECT_ROOT / os.environ.get("SUMMARY_DIR", "data/summaries")
 # A relative FEED_PATH is taken from the project root; an absolute one is used as is.
 FEED_PATH_SETTING = os.environ.get("FEED_PATH", "data/raw/halifax.zip")
@@ -452,6 +450,8 @@ def run_tool(name, tool_input):
         return f"Feed data problem: {e}", True
     except ValueError as e:
         return f"Invalid input: {e}", True
+    except (KeyError, TypeError) as e:  # a missing or malformed argument (models without strict tools)
+        return f"Invalid input: missing or malformed argument {e}", True
 
 
 class AgentError(Exception):
@@ -471,78 +471,64 @@ def check_block_data(agency=DEFAULT_AGENCY):
 def answer_question(question, agency=DEFAULT_AGENCY, log=None, model=None):
     """Answer one question about one agency and return {"answer", "tool_calls", "rounds", "usage"}.
 
-    usage totals the tokens over every round (for cost tracking; /ask doesn't return it).
-    model: any Anthropic model ID (default MODEL); evals use it to compare models.
+    usage totals the tokens over every round (for cost tracking; /ask doesn't return it), plus
+    cost_usd when the provider reports it (OpenRouter does).
+    model: an Anthropic model ID (default MODEL) or "openrouter:<model-id>"; evals use it to
+    compare models. src/providers.py talks to the provider.
 
-    tool_calls lists every tool Claude asked for, as {"name", "input", "result"}.
+    tool_calls lists every tool the model asked for, as {"name", "input", "result"}.
     log, if given, is called with each progress line as it happens (the script passes print).
-    Raises AgentError for setup problems or no answer; Anthropic API errors are passed through.
+    Raises AgentError for setup problems or no answer; provider errors (anthropic.APIError,
+    ProviderError) are passed through.
     """
     log = log or (lambda text: None)
     get_agency(agency)  # ValueError for an unknown agency
 
+    model = model or MODEL
     load_dotenv(PROJECT_ROOT / ".env")
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        raise AgentError("ANTHROPIC_API_KEY not found: add it to .env and save the file")
+    if not os.environ.get(key_name(model)):
+        raise AgentError(f"{key_name(model)} not found: add it to .env and save the file")
     check_block_data(agency)
 
-    client = anthropic.Anthropic()
-    messages = [{"role": "user", "content": question}]
+    messages = [{"role": "user", "text": question}]
     tool_calls = []
     usage = {"input_tokens": 0, "output_tokens": 0}
     log(f"QUESTION: {question}\n")
 
-    model = model or MODEL
-    # Server-side refusal fallback ("default" mode) only exists for some models.
-    fallback = {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"} \
-        if model in FALLBACK_MODELS else {}
-
     for round_number in range(1, MAX_ROUNDS + 1):
-        log(f"--- Round {round_number}: sending conversation to Claude ---")
-        response = client.beta.messages.create(
-            model=model,
-            max_tokens=16000,
-            system=system_prompt(agency),
-            tools=TOOLS,
-            messages=messages,
-            output_config={"effort": "medium"},
-            **fallback,
-        )
+        log(f"--- Round {round_number}: sending conversation to {model} ---")
+        response = complete(model, system_prompt(agency), TOOLS, messages)
 
-        # Keep Claude's whole reply in the conversation, exactly as it came back.
-        messages.append({"role": "assistant", "content": response.content})
-        usage["input_tokens"] += response.usage.input_tokens
-        usage["output_tokens"] += response.usage.output_tokens
+        # Keep the model's whole reply in the conversation, exactly as it came back.
+        messages.append({"role": "assistant", "native": response["native"],
+                         "tool_calls": response["tool_calls"]})
+        usage["input_tokens"] += response["usage"]["input_tokens"]
+        usage["output_tokens"] += response["usage"]["output_tokens"]
+        if response["usage"].get("cost_usd") is not None:
+            usage["cost_usd"] = usage.get("cost_usd", 0) + response["usage"]["cost_usd"]
 
-        texts = [b.text for b in response.content if b.type == "text" and b.text.strip()]
-        label = "FINAL ANSWER" if response.stop_reason == "end_turn" else "CLAUDE SAYS"
+        texts = response["texts"]
+        label = "FINAL ANSWER" if response["stop"] == "end" else "MODEL SAYS"
         for text in texts:
             log(f"{label}:\n{text}\n")
 
-        if response.stop_reason == "end_turn":
+        if response["stop"] == "end":
             return {"answer": "\n\n".join(texts), "tool_calls": tool_calls, "rounds": round_number,
                     "usage": usage}
-        if response.stop_reason == "refusal":
-            raise AgentError("Claude declined to answer this request")
-        if response.stop_reason != "tool_use":
-            raise AgentError(f"Stopped unexpectedly (stop_reason={response.stop_reason})")
+        if response["stop"] == "refusal":
+            raise AgentError("The model declined to answer this request")
+        if response["stop"] != "tool_use":
+            raise AgentError(f"Stopped unexpectedly (stop_reason={response['stop']})")
 
-        # Claude asked for one or more tool calls: run each and send all results back together.
-        tool_results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                log(f"TOOL CALL:   {block.name}({json.dumps(block.input)})")
-                result, is_error = run_tool(block.name, block.input)
-                log(f"PYTHON SAID: {result}\n")
-                tool_calls.append({"name": block.name, "input": block.input, "result": result})
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": block.id,  # links this result to the call above
-                        "content": result,
-                        "is_error": is_error,
-                    }
-                )
-        messages.append({"role": "user", "content": tool_results})
+        # The model asked for one or more tool calls: run each and send all results back together.
+        results = []
+        for call in response["tool_calls"]:
+            log(f"TOOL CALL:   {call['name']}({json.dumps(call['input'])})")
+            result, is_error = run_tool(call["name"], call["input"])
+            log(f"PYTHON SAID: {result}\n")
+            tool_calls.append({"name": call["name"], "input": call["input"], "result": result})
+            # id links this result to the call above
+            results.append({"id": call["id"], "content": result, "is_error": is_error})
+        messages.append({"role": "tool_results", "results": results})
 
     raise AgentError(f"Stopped after {MAX_ROUNDS} rounds without a final answer")
