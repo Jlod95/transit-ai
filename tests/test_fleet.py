@@ -81,8 +81,9 @@ def test_charging_needs(summary):
 
 def test_cost_and_co2(summary):
     result = cost_and_co2(summary, "winter", **SETTINGS)
-    # No extra buses; 1 charger: 0 x 1,200,000 + 1 x 150,000 = 150,000.
-    assert (result["extra_buses"], result["chargers"], result["capital_cost"]) == (0, 1, 150_000)
+    # Every electric bus needed is priced: 1 bus and 1 charger = 1,200,000 + 150,000 = 1,350,000.
+    assert (result["electric_buses_priced"], result["of_which_extra_buses"]) == (1, 0)
+    assert (result["chargers"], result["capital_cost"]) == (1, 1_350_000)
     # 55 km a day x 300 days = 16,500 km a year.
     assert result["annual_km"] == 16_500
     # Electric: 16,500 km x 2.0 kWh/km x 0.15 = 4,950. Diesel: 16,500 x 0.55 L x 1.70 = 15,427.50.
@@ -93,6 +94,39 @@ def test_cost_and_co2(summary):
 
 
 def test_capital_cost_with_a_block_over_range(summary):
-    # 1 extra bus and 2 chargers (one per electric bus): 1,200,000 + 2 x 150,000 = 1,500,000.
+    # 2 electric buses (1 replacement + 1 extra) and 2 chargers:
+    # 2 x 1,200,000 + 2 x 150,000 = 2,700,000.
     result = cost_and_co2(summary, "winter", **TINY_BATTERY)
-    assert (result["extra_buses"], result["chargers"], result["capital_cost"]) == (1, 2, 1_500_000)
+    assert (result["electric_buses_priced"], result["of_which_extra_buses"]) == (2, 1)
+    assert (result["chargers"], result["capital_cost"]) == (2, 2_700_000)
+
+
+def test_all_in_price_with_charger_included(summary):
+    # Halifax-style all-in price per bus with its charger, so the charger price is 0:
+    # 1 electric bus x 1,578,998 + 1 charger x 0 = 1,578,998.
+    settings = {**SETTINGS, "electric_bus_price": 94_739_857 / 60, "charger_price": 0}
+    result = cost_and_co2(summary, "winter", **settings)
+    assert result["capital_cost"] == 1_578_998
+    assert result["assumptions"]["electric_bus_price"] == 1_578_998
+
+
+def test_every_assumption_is_reported_with_a_source(summary):
+    for tool in (fleet_size, charging_needs, cost_and_co2):
+        assumptions = tool(summary, "winter")["assumptions"]
+        sources = assumptions["sources"]
+        for name in assumptions:
+            if name in ("usable_kwh", "notes", "sources"):
+                continue  # derived values and notes, not assumptions
+            assert name in sources, f"{tool.__name__}: no source for {name}"
+            assert sources[name]["status"] in ("SOURCED", "PLACEHOLDER", "CHOICE")
+
+
+def test_winter_energy_cites_both_sources(summary):
+    sources = fleet_size(summary, "winter")["assumptions"]["sources"]
+    winter = sources["kwh_per_km"]
+    assert winter["status"] == "SOURCED" and winter["pages"] == "1"
+    assert "1.22" in winter["note"] and "1.425" in winter["note"]  # TTC summer x Finnish uplift
+    assert sources["replacement_ratio_benchmark"]["status"] == "PLACEHOLDER"
+    summer = fleet_size(summary, "summer")["assumptions"]["sources"]["kwh_per_km"]
+    assert summer["pages"] == "55"
+    assert summer["url"].startswith("https://www.ttc.ca/")

@@ -31,18 +31,21 @@ def test_one_block_fits_one_does_not(mini_feed):
 
 
 def test_usable_kwh_is_nominal_times_usable_fraction(mini_feed):
-    # Config: 450 kWh nominal x 0.8 usable = 360 kWh.
+    # Config (TTC New Flyer, p. 55): 400 kWh nominal x 285/400 usable = 285 kWh.
     result = fleet_feasibility(mini_feed, WEEKDAY, "winter")
     assumptions = result["assumptions"]
-    assert assumptions["nominal_battery_kwh"] == 450
-    assert assumptions["usable_fraction"] == 0.8
-    assert assumptions["usable_kwh"] == 360.0
+    assert assumptions["nominal_battery_kwh"] == 400
+    assert assumptions["usable_fraction"] == 0.7125
+    assert assumptions["usable_kwh"] == 285.0
+    assert assumptions["sources"]["usable_fraction"]["pages"] == "55"
 
 
 def test_uses_config_assumptions_by_default(mini_feed):
-    # Config: 360 usable kWh / 2.0 kWh per km in winter = 180 km, so both blocks fit.
+    # Config: winter kWh/km = 1.22 x 1.425 = 1.7385; 285 usable kWh / 1.7385 = 163.9 km,
+    # so both blocks (25 and 30 km) fit.
     result = fleet_feasibility(mini_feed, WEEKDAY, "winter")
-    assert result["range_km"] == 180.0
+    assert result["assumptions"]["kwh_per_km"] == 1.7385
+    assert result["range_km"] == 163.9
     assert result["within_range"] == 2
 
 

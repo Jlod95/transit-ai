@@ -27,18 +27,16 @@ def range_km_for(season, nominal_battery_kwh=None, usable_fraction=None, kwh_per
         raise ValueError(f"Unknown season {season!r}; expected one of {sorted(kwh_per_km)}")
 
     usable_kwh = nominal_battery_kwh * usable_fraction
+    sources = assumptions.sources_for("nominal_battery_kwh", "usable_fraction")
+    energy = assumptions.ASSUMPTION_SOURCES["kwh_per_km"]
+    sources["kwh_per_km"] = {"status": energy["status"], **energy.get(season, {})}
     used = {
         "nominal_battery_kwh": nominal_battery_kwh,
-        "usable_fraction": usable_fraction,
+        "usable_fraction": round(usable_fraction, 4),
         "usable_kwh": round(usable_kwh, 1),
-        "usable_fraction_reason": (
-            "Industry practice: buses keep about 20% in reserve, because routinely "
-            "discharging below that speeds up battery wear and leaves no margin for "
-            "delays and cold."
-        ),
-        "kwh_per_km": kwh_per_km[season],
-        "status": "Battery size and kWh/km are PLACEHOLDER values, to be sourced in M4",
+        "kwh_per_km": round(kwh_per_km[season], 4),
         "notes": "One overnight charge, no daytime charging; revenue km only (no deadhead).",
+        "sources": sources,
     }
     return usable_kwh / kwh_per_km[season], used
 

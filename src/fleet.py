@@ -2,7 +2,8 @@
 
 Store facts, compute judgement: the summary holds each block's km and start/end times; these
 functions turn them into judgements at question time, using the design day and the
-placeholders in config/assumptions.py. Any setting can be overridden by keyword (tests do).
+assumptions in config/assumptions.py, each reported next to its source or placeholder label.
+Any setting can be overridden by keyword (tests do).
 """
 
 import math
@@ -16,6 +17,15 @@ RANGE_SETTINGS = ("nominal_battery_kwh", "usable_fraction", "kwh_per_km")
 
 def _setting(name, overrides):
     return overrides[name] if name in overrides else getattr(assumptions, name)
+
+
+def _with_sources(used, values):
+    """The range assumptions plus extra values, with every value's source alongside."""
+    return {
+        **{k: v for k, v in used.items() if k != "sources"},
+        **values,
+        "sources": {**used["sources"], **assumptions.sources_for(*values)},
+    }
 
 
 def peak_blocks_in_service(blocks):
@@ -62,10 +72,9 @@ def fleet_size(summary, season, **overrides):
             "Each block over one charge's range needs one extra bus (crude: assumes a fresh bus "
             "swaps in mid-day). Ratio = electric buses / buses today. Spare buses not included."
         ),
-        "assumptions": {
-            **used,
-            "replacement_ratio_benchmark": "PLACEHOLDER commonly quoted planning figure",
-        },
+        "assumptions": _with_sources(
+            used, {"replacement_ratio_benchmark": _setting("replacement_ratio_benchmark", overrides)}
+        ),
     }
 
 
@@ -92,10 +101,7 @@ def charging_needs(summary, season, **overrides):
             "over range would need more than one battery's worth; this counts their full energy. "
             "Revenue km only, so real energy is higher."
         ),
-        "assumptions": {
-            **used,
-            "charging_window_hours": "PLACEHOLDER",
-        },
+        "assumptions": _with_sources(used, {"charging_window_hours": window}),
     }
 
 
@@ -108,11 +114,14 @@ def cost_and_co2(summary, season, **overrides):
         "electricity_price_per_kwh", "diesel_price_per_litre", "diesel_litres_per_km",
         "kg_co2_per_litre_diesel", "annual_service_days",
     )}
-    kwh_per_km = fleet["assumptions"]["kwh_per_km"]
+    _, _, _, used = _design_day(summary, season, overrides)
+    kwh_per_km = used["kwh_per_km"]
 
+    # Every electric bus needed (replacements plus extras) is priced, with its chargers.
+    electric_buses = fleet["electric_buses_needed"]
     extra_buses = fleet["blocks_over_range"]
-    chargers = math.ceil(fleet["electric_buses_needed"] / s["buses_per_charger"])
-    capital = extra_buses * s["electric_bus_price"] + chargers * s["charger_price"]
+    chargers = math.ceil(electric_buses / s["buses_per_charger"])
+    capital = electric_buses * s["electric_bus_price"] + chargers * s["charger_price"]
 
     annual_km = charging["daily_km"] * s["annual_service_days"]
     electricity_cost = annual_km * kwh_per_km * s["electricity_price_per_kwh"]
@@ -124,7 +133,8 @@ def cost_and_co2(summary, season, **overrides):
         "design_day": fleet["design_day"],
         "season": season,
         "currency": s["currency"],
-        "extra_buses": extra_buses,
+        "electric_buses_priced": electric_buses,
+        "of_which_extra_buses": extra_buses,
         "chargers": chargers,
         "capital_cost": round(capital),
         "annual_km": round(annual_km),
@@ -133,16 +143,14 @@ def cost_and_co2(summary, season, **overrides):
         "annual_energy_saving": round(diesel_cost - electricity_cost),
         "annual_co2_saved_tonnes": round(co2_tonnes, 1),
         "method": (
-            "Capital = extra buses (one per block over range) x electric bus price + chargers "
-            "(electric buses / buses per charger, rounded up) x charger price; it leaves out "
-            "replacing the existing buses and any grid upgrades. Annual km = design-day km x "
+            "Capital = every electric bus needed (replacements for today's buses plus one "
+            "extra per block over range) x electric bus price + chargers (electric buses / buses "
+            "per charger, rounded up) x charger price. With the Halifax all-in price the charger "
+            "is inside the bus price, so the charger price is 0. Grid upgrades and spare buses are "
+            "not included. Annual km = design-day km x "
             "annual service days. Energy costs use this season's kWh per km all year. CO2 "
             "saved = diesel litres x kg CO2 per litre; electricity generation emissions are "
             "not subtracted."
         ),
-        "assumptions": {
-            **{k: v for k, v in s.items()},
-            "kwh_per_km": kwh_per_km,
-            "status": "All prices, fuel use, CO2 factor and service days are PLACEHOLDERS",
-        },
+        "assumptions": _with_sources(used, {**s, "electric_bus_price": round(s["electric_bus_price"])}),
     }

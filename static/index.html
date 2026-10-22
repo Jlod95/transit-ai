@@ -148,7 +148,7 @@
   <h1>Transit AI: could an electric bus run it?</h1>
   <p id="lead" class="lead">
     A first-pass check of which Halifax Transit bus blocks could run on one overnight charge,
-    using public GTFS schedule data (valid to 29 Nov 2026) and placeholder battery assumptions.
+    using public GTFS schedule data (valid to 29 Nov 2026) and battery figures from published bus trials.
   </p>
 
   <form id="ask-form" class="card">
@@ -192,9 +192,10 @@
   </section>
 
   <div class="card note">
-    Battery size and energy use are placeholder assumptions, not sourced figures, and distances
-    leave out empty running to and from the garage, so results are optimistic. Treat this as a
-    first pass, not a recommendation.
+    Battery size and energy use come from published bus trials (Toronto, with a Finnish winter
+    adjustment) and are cited in each answer; electricity and diesel prices are still placeholders.
+    Distances leave out empty running to and from the garage, so results are optimistic. Treat
+    this as a first pass, not a recommendation.
   </div>
 
   <footer>
@@ -221,8 +222,8 @@
   const AGENCY_INFO = {
     halifax: {
       lead: "A first-pass check of which Halifax Transit bus blocks could run on one overnight " +
-        "charge, using public GTFS schedule data (valid to 29 Nov 2026) and placeholder battery " +
-        "assumptions.",
+        "charge, using public GTFS schedule data (valid to 29 Nov 2026) and battery figures from " +
+        "published bus trials.",
       estimate: "",
       credit: "Halifax Transit GTFS, under the Open Government Licence – Halifax",
       examples: [
@@ -232,13 +233,13 @@
         "How many electric buses would Halifax need in winter, and what is the replacement ratio?",
         "How much energy and depot power would Halifax's electric fleet need to charge overnight in winter?",
         "Roughly what would electrifying Halifax's buses cost, and how much CO2 would it save each year?",
-        "What do published sources say about electric bus energy use in winter, and how does that compare with the placeholder we use?",
+        "What do published sources say about electric bus energy use in winter, and how does that compare with the figure we use?",
       ],
     },
     dublin: {
       lead: "A first-pass check of which Dublin Bus and Go-Ahead Ireland blocks could run on one " +
         "overnight charge, using the National Transport Authority's GTFS data (to 30 Jan 2027) " +
-        "and placeholder battery assumptions.",
+        "and battery figures from published bus trials.",
       estimate: "",
       credit: "National Transport Authority (Transport for Ireland) GTFS, under CC BY 4.0",
       examples: [
@@ -248,13 +249,13 @@
         "How many electric buses would Dublin need in winter, and what is the replacement ratio?",
         "How much energy and depot power would Dublin's electric fleet need to charge overnight in winter?",
         "Roughly what would electrifying Dublin's buses cost, and how much CO2 would it save each year?",
-        "What do published sources say about electric bus energy use in winter, and how does that compare with the placeholder we use?",
+        "What do published sources say about electric bus energy use in winter, and how does that compare with the figure we use?",
       ],
     },
     london: {
       lead: "A rough first pass at which TfL bus blocks could run on one overnight charge, using " +
-        "the Bus Open Data Service timetable for the 4 weeks from 21 Oct 2026 and placeholder " +
-        "battery assumptions.",
+        "the Bus Open Data Service timetable for the 4 weeks from 21 Oct 2026 and published " +
+        "battery figures.",
       estimate: "London figures are approximate: distances are estimated from straight lines " +
         "between stops, and blocks are inferred by chaining trips, because the data publishes " +
         "neither.",
@@ -266,7 +267,7 @@
         "How many electric buses would London need in winter, and what is the replacement ratio?",
         "How much energy and depot power would London's electric fleet need to charge overnight in winter?",
         "Roughly what would electrifying London's buses cost, and how much CO2 would it save each year?",
-        "What do published sources say about electric bus energy use in winter, and how does that compare with the placeholder we use?",
+        "What do published sources say about electric bus energy use in winter, and how does that compare with the figure we use?",
       ],
     },
   };
