@@ -74,3 +74,28 @@ Run `20261022T204337Z-all-k3-claude-opus-5-5.json` · commit `9f7eeaa` · k=3 ·
 - `london-07-outside_timetable` #3 end_state: missing says the date isn't covered
 
 </details>
+
+## openrouter:deepseek/deepseek-v4.1-flash
+
+Run `20261022T231239Z-all-k3-openrouter-deepseek-v4.1-flash.json` · commit `570439b` · k=3 · 2026-10-22T23:12:39Z
+
+| Split | Tasks | Attempts passed | pass@3 | pass^3 |
+|---|---|---|---|---|
+| dev (Halifax) | 14 | 39/42 | 14/14 | 11/14 |
+| held-out (Dublin, London) | 16 | 44/48 | 16/16 | 13/16 |
+
+| Failed attempts: steps | end state | unsupported numbers | Avg cost / attempt | Avg latency / attempt | Total cost |
+|---|---|---|---|---|---|
+| 0 | 2 | 5 | $0.0009 | 5.0 s | $0.08 |
+
+<details><summary>Failure details</summary>
+
+- `halifax-06-design_day` #1 end_state: missing design day
+- `halifax-08-charging` #3 unsupported: unsupported: −1, −10
+- `halifax-11-not_running` #1 unsupported: unsupported: 25, 722145
+- `dublin-08-not_running` #3 unsupported: unsupported: 722145, 25
+- `london-03-feasibility_summer` #1 unsupported: unsupported: 90
+- `london-03-feasibility_summer` #2 unsupported: unsupported: 90
+- `london-05-cost_co2` #2 end_state: missing CO2 saved (t/yr)
+
+</details>
