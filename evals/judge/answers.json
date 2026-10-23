@@ -1,0 +1,122 @@
+[
+ {
+  "id": 1,
+  "model": "claude-sonnet-5-5",
+  "task_id": "halifax-06-design_day",
+  "attempt": 1
+ },
+ {
+  "id": 2,
+  "model": "claude-haiku-5-5",
+  "task_id": "halifax-05-feasibility_winter",
+  "attempt": 1
+ },
+ {
+  "id": 3,
+  "model": "claude-haiku-5-5",
+  "task_id": "halifax-09-cost_co2",
+  "attempt": 1
+ },
+ {
+  "id": 4,
+  "model": "claude-haiku-5-5",
+  "task_id": "dublin-06-fleet_size",
+  "attempt": 1
+ },
+ {
+  "id": 5,
+  "model": "claude-opus-5-5",
+  "task_id": "halifax-12-outside_timetable",
+  "attempt": 1
+ },
+ {
+  "id": 6,
+  "model": "claude-haiku-5-5",
+  "task_id": "halifax-13-abstain",
+  "attempt": 1
+ },
+ {
+  "id": 7,
+  "model": "claude-opus-5-5",
+  "task_id": "london-05-cost_co2",
+  "attempt": 3
+ },
+ {
+  "id": 8,
+  "model": "claude-sonnet-5-5",
+  "task_id": "london-05-cost_co2",
+  "attempt": 1
+ },
+ {
+  "id": 9,
+  "model": "deepseek-v4.1-flash",
+  "task_id": "halifax-07-fleet_size",
+  "attempt": 1
+ },
+ {
+  "id": 10,
+  "model": "claude-sonnet-5-5",
+  "task_id": "dublin-02-block_duration",
+  "attempt": 1
+ },
+ {
+  "id": 11,
+  "model": "claude-sonnet-5-5",
+  "task_id": "halifax-10-sources",
+  "attempt": 1
+ },
+ {
+  "id": 12,
+  "model": "claude-opus-5-5",
+  "task_id": "dublin-04-feasibility_winter",
+  "attempt": 3
+ },
+ {
+  "id": 13,
+  "model": "claude-sonnet-5-5",
+  "task_id": "london-07-outside_timetable",
+  "attempt": 1
+ },
+ {
+  "id": 14,
+  "model": "deepseek-v4.1-flash",
+  "task_id": "dublin-08-not_running",
+  "attempt": 3
+ },
+ {
+  "id": 15,
+  "model": "claude-opus-5-5",
+  "task_id": "dublin-07-charging",
+  "attempt": 1
+ },
+ {
+  "id": 16,
+  "model": "deepseek-v4.1-flash",
+  "task_id": "london-03-feasibility_summer",
+  "attempt": 1
+ },
+ {
+  "id": 17,
+  "model": "deepseek-v4.1-flash",
+  "task_id": "halifax-11-not_running",
+  "attempt": 1
+ },
+ {
+  "id": 18,
+  "model": "deepseek-v4.1-flash",
+  "task_id": "halifax-08-charging",
+  "attempt": 3
+ },
+ {
+  "id": 19,
+  "model": "claude-opus-5-5",
+  "task_id": "london-02-block_both",
+  "attempt": 3
+ },
+ {
+  "id": 20,
+  "model": "claude-haiku-5-5",
+  "task_id": "london-01-block_distance",
+  "attempt": 1
+ }
+]

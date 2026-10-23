@@ -1,0 +1,292 @@
+{
+ "summary": {
+  "model": "claude-sonnet-5-5",
+  "pairs": 10,
+  "flips": 4,
+  "first_position_wins": 10,
+  "comparisons": 20,
+  "cost_usd": 0.1592
+ },
+ "rows": [
+  {
+   "task_id": "halifax-03-block_both",
+   "pair": [
+    "claude-sonnet-5-5",
+    "claude-haiku-5-5"
+   ],
+   "flipped": true,
+   "verdicts": [
+    {
+     "order": [
+      "claude-sonnet-5-5",
+      "claude-haiku-5-5"
+     ],
+     "better": "B",
+     "winner": "claude-haiku-5-5",
+     "reason": "Both give the same correct figures (220.7 revenue km, 12 h 2 min). Both also add the same unsupported definitions of the time span, layovers and garage running, which the tool outputs do not state. B is slightly tighter and calls the figure 'Time in service', which matches the tool wording. A says the tools 'did not say' the block was inferred, a mildly odd framing, while B says the results 'did not flag' it, which is more natural. The difference is marginal, so B edges ahead on clarity."
+    },
+    {
+     "order": [
+      "claude-haiku-5-5",
+      "claude-sonnet-5-5"
+     ],
+     "better": "B",
+     "winner": "claude-sonnet-5-5",
+     "reason": "Both give the same figures from the tool outputs and add the same definitional caveats. Those caveats (excluding deadhead, first departure to last arrival, layovers included) go beyond the tool output, so both are slightly unsupported. B is a bit more neutral and concise, saying 'The tools did not say...' and avoiding A's 'did not flag' phrasing. A's 'Halifax Transit' is also an unneeded embellishment. The two are nearly equivalent, with a slight edge to B."
+    }
+   ]
+  },
+  {
+   "task_id": "halifax-05-feasibility_winter",
+   "pair": [
+    "claude-opus-5-5",
+    "deepseek-v4.1-flash"
+   ],
+   "flipped": false,
+   "verdicts": [
+    {
+     "order": [
+      "claude-opus-5-5",
+      "deepseek-v4.1-flash"
+     ],
+     "better": "A",
+     "winner": "claude-opus-5-5",
+     "reason": "Both give the correct headline (331 of 461, 71.8%) and the right range and block table. A is accurate and concise, and it correctly says the revenue-km-only basis makes the result optimistic. B adds claims the tool output does not support: that 'daytime charging could rescue some blocks' and that the count is 'approximate in both directions', a statement that 'placeholders appear in the cost/CO\u2082 and charging-window tools', and an offer of a design-day tool. It also calls the no-daytime-charging assumption 'conservative' while saying the count is approximate both ways. These go beyond the tool outputs and muddy the message, so A is better."
+    },
+    {
+     "order": [
+      "deepseek-v4.1-flash",
+      "claude-opus-5-5"
+     ],
+     "better": "B",
+     "winner": "claude-opus-5-5",
+     "reason": "Both give the correct figures (331 of 461 blocks, 71.8%, 163.9 km range). B's caveats are accurate: no daytime charging and revenue km only, so the real count is somewhat lower. A states that \"no daytime charging\" makes the view conservative, then says the count errs in both directions. That is a defensible point, but it adds muddle. A also states things the tool output does not support, such as \"Placeholders appear in the cost/CO\u2082 and charging-window tools\" and the offer of a design-day tool. B is tighter and stays within the tool output."
+    }
+   ]
+  },
+  {
+   "task_id": "halifax-07-fleet_size",
+   "pair": [
+    "claude-sonnet-5-5",
+    "claude-opus-5-5"
+   ],
+   "flipped": false,
+   "verdicts": [
+    {
+     "order": [
+      "claude-sonnet-5-5",
+      "claude-opus-5-5"
+     ],
+     "better": "B",
+     "winner": "claude-opus-5-5",
+     "reason": "Both answers report the same correct figures (414 vs 284, ratio 1.458) and the same sources. B adds the caveat that the design day, 2026-08-24, is a summer date, so the result is that day's schedule run with winter energy use and not a real winter timetable. A omits this, and a planner forwarding it could be misled. B also says the spare-bus omission means real needs would be higher, and it explains the 1.2 benchmark placeholder clearly. B's wording 'worst-case day' is a slight embellishment of 'design day', but it is minor next to A's omission."
+    },
+    {
+     "order": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+     ],
+     "better": "A",
+     "winner": "claude-opus-5-5",
+     "reason": "Both give the correct numbers (284 today, 414 electric, ratio 1.458) and the main caveats. A also flags that the design day, 2026-08-24, is a summer date, so the result is that day's schedule run with winter energy use and not a real winter timetable. A planner could easily be misled without that, and B labels the result 'Winter result' with no such warning. A has minor flaws: it calls the day 'worst-case' and says the benchmark is 'none of the indexed documents', which is a slight paraphrase. Even so, it is more transparent and safer to forward."
+    }
+   ]
+  },
+  {
+   "task_id": "halifax-09-cost_co2",
+   "pair": [
+    "claude-haiku-5-5",
+    "deepseek-v4.1-flash"
+   ],
+   "flipped": true,
+   "verdicts": [
+    {
+     "order": [
+      "claude-haiku-5-5",
+      "deepseek-v4.1-flash"
+     ],
+     "better": "A",
+     "winner": "claude-haiku-5-5",
+     "reason": "Both give the same correct headline figures (CAD 653.7M capital, 19,449 t CO2/yr). A is concise and flags the key caveats: placeholder prices, no grid upgrades or spares, revenue km only, tailpipe-only CO2, and an August design day paired with winter energy. B adds details the truncated tool output doesn't show (92.11 MWh, 15.35 MW, 163.9 km range, 28.2% of blocks, 461 blocks, 1.2 benchmark, 6-hour window, sha256), so they cannot be checked against the ground truth. B also lists currency as a placeholder although the tool marks it as a CHOICE, and it mislabels the 'buses today' figure."
+    },
+    {
+     "order": [
+      "deepseek-v4.1-flash",
+      "claude-haiku-5-5"
+     ],
+     "better": "A",
+     "winner": "deepseek-v4.1-flash",
+     "reason": "Both give the correct headline numbers (CAD 653.7M capital, 19,449 t CO2/yr). A is more complete and faithful to the tool outputs: it flags that chargers are bundled into the bus price, lists the placeholders (including service days, charging window, benchmark), and adds the charging-power and range context. B contains an unsupported claim, that the design day was chosen as 'the hardest day in the timetable for the season', which no tool output says. B also describes 'late-summer' as a caveat without evidence for the reason. A's caveats are accurate and it makes no unsupported claims."
+    }
+   ]
+  },
+  {
+   "task_id": "halifax-14-abstain",
+   "pair": [
+    "claude-sonnet-5-5",
+    "deepseek-v4.1-flash"
+   ],
+   "flipped": false,
+   "verdicts": [
+    {
+     "order": [
+      "claude-sonnet-5-5",
+      "deepseek-v4.1-flash"
+     ],
+     "better": "A",
+     "winner": "claude-sonnet-5-5",
+     "reason": "There were no tool calls, so Answer B's claim that it searched the public-source index and saw passages about TTC range testing and charger costs is fabricated. Answer A only describes its tool scope, declines to guess a wage, and points to the collective agreement or job postings, which is honest and correct."
+    },
+    {
+     "order": [
+      "deepseek-v4.1-flash",
+      "claude-sonnet-5-5"
+     ],
+     "better": "B",
+     "winner": "claude-sonnet-5-5",
+     "reason": "Both correctly decline, since the tool outputs contain no wage data. B is concise and accurate, and it points to job postings or the collective agreement. A adds claims about the index contents and the tools, such as 'TTC range testing' and 'charger costs', that the shown outputs don't support. A also asserts the cost tool excludes labour without evidence in the outputs, so it is riskier to forward as-is."
+    }
+   ]
+  },
+  {
+   "task_id": "dublin-03-block_both",
+   "pair": [
+    "claude-sonnet-5-5",
+    "claude-haiku-5-5"
+   ],
+   "flipped": false,
+   "verdicts": [
+    {
+     "order": [
+      "claude-sonnet-5-5",
+      "claude-haiku-5-5"
+     ],
+     "better": "A",
+     "winner": "claude-sonnet-5-5",
+     "reason": "Both give the correct figures (71.7 revenue km, 7 h 3 min). Both also add definitions the tool outputs never stated (service time spans first departure to last arrival, excludes pull-out/in). B adds extra unsupported claims: that the bus's total driven distance 'will be higher', and a note about feed version not being reported. A's note that nothing was flagged as estimated is a mild inference, while B's additions are more speculative. A is slightly tighter and less speculative."
+    },
+    {
+     "order": [
+      "claude-haiku-5-5",
+      "claude-sonnet-5-5"
+     ],
+     "better": "B",
+     "winner": "claude-sonnet-5-5",
+     "reason": "Both give the correct figures (71.7 revenue km, 7 h 3 min). Both also add definitions the tool outputs do not support, such as the exclusion of deadhead and the first-departure-to-last-arrival span. B is more concise and states only that neither result flagged estimation or inference. A adds a claim that the tool did not report a feed version, which is irrelevant noise, and its assertion that total driven distance 'will be higher' is stronger and unsupported. B is cleaner and makes fewer unsupported claims."
+    }
+   ]
+  },
+  {
+   "task_id": "dublin-05-design_day",
+   "pair": [
+    "claude-opus-5-5",
+    "deepseek-v4.1-flash"
+   ],
+   "flipped": false,
+   "verdicts": [
+    {
+     "order": [
+      "claude-opus-5-5",
+      "deepseek-v4.1-flash"
+     ],
+     "better": "B",
+     "winner": "deepseek-v4.1-flash",
+     "reason": "Both give the correct day (Sat 24 Oct 2026) and the correct count (187 of 1,172 blocks, 16.0%). B states the figures accurately and caveats them properly: revenue km only, one overnight charge, optimistic, and the 'summer' label only sets the energy assumption. A adds claims the tool output does not support. It says all three values (battery, usable fraction, kWh/km) are 'summer' energy use, and that winter use 'would be higher and would put more blocks over range'. It also says 'Counting the empty trips would likely push more blocks over the limit' and calls the longest block 'nearly twice' the range (458.9 vs 233.6 is about 1.96x, which is fine). The 'Saturday' weekday in both answers is not in the tool output, though 24 Oct 2026 is in fact a Saturday. A's 'Summer energy use of 1.22 kWh/km' is slightly misleading, because the source is a 2021 in-service annual average, not a summer figure. B's 'in summer' for 1.22 is similarly loose, but B's sourcing note correctly calls it a '2021 in-service average'. B is more faithful and concise."
+    },
+    {
+     "order": [
+      "deepseek-v4.1-flash",
+      "claude-opus-5-5"
+     ],
+     "better": "A",
+     "winner": "deepseek-v4.1-flash",
+     "reason": "Both give the right date (24 Oct 2026) and count (187 of 1,172, 16%). Answer B makes claims the tool output does not support. It says \"Summer energy use of 1.22 kWh/km\", but the source is a TTC 2021 in-service average and the output never ties it to summer. It says winter energy use \"would put more blocks over range\", which is plausible but not shown by the tools. It states the tie-break rule in the hypothetical (\"if two days had tied\") without noting that the rule is a three-step ordering. Its bullet \"All three come from...\" sits under a list of two items, which is sloppy. Answer A also says \"at 1.22 kWh/km in summer\", but it then explains that \"summer\" only sets the energy assumption, and it offers to run the winter case. A also reports the data snapshot details, including both feed hashes, and the SOURCED status. B's claim that more blocks would be over range once deadhead is counted is a reasonable inference. B's \"data is solid\" is a bit overconfident. Overall A is more accurate and more careful."
+    }
+   ]
+  },
+  {
+   "task_id": "london-02-block_both",
+   "pair": [
+    "claude-sonnet-5-5",
+    "claude-opus-5-5"
+   ],
+   "flipped": false,
+   "verdicts": [
+    {
+     "order": [
+      "claude-sonnet-5-5",
+      "claude-opus-5-5"
+     ],
+     "better": "A",
+     "winner": "claude-sonnet-5-5",
+     "reason": "Both give the correct figures and the estimated/inferred caveats. B adds claims the tool output doesn't support: that London's data is \"grouped by operator\", that the block may not match TfL's vehicle schedule, and that real mileage is \"somewhat higher\". It also offers an unrequested follow-up. A sticks to what the tools showed, with the right caveats, and is concise."
+    },
+    {
+     "order": [
+      "claude-opus-5-5",
+      "claude-sonnet-5-5"
+     ],
+     "better": "B",
+     "winner": "claude-sonnet-5-5",
+     "reason": "Both give the correct figures and flag that the distance is estimated and the block inferred. B sticks to what the tool outputs support. A adds unsupported claims: that London's data is 'grouped by operator' and that the block may not match the schedule TfL actually uses. It also asserts that the real mileage will be 'somewhat higher' and offers a battery-electric follow-up. B is more concise and has nothing misleading in it."
+    }
+   ]
+  },
+  {
+   "task_id": "london-04-design_day",
+   "pair": [
+    "claude-haiku-5-5",
+    "deepseek-v4.1-flash"
+   ],
+   "flipped": true,
+   "verdicts": [
+    {
+     "order": [
+      "claude-haiku-5-5",
+      "deepseek-v4.1-flash"
+     ],
+     "better": "B",
+     "winner": "deepseek-v4.1-flash",
+     "reason": "Both give the right date (2026-10-22) and count (5,559 of 9,135 blocks, 60.9%). B is better on caveats and accuracy. It says revenue-km-only distances exclude deadhead, so the result is optimistic, and it tells the planner to treat the 60.9% as approximate. A omits the deadhead caveat. A also says the other built dates are \"less demanding,\" which the tool output does not support: the output only says one date has this pattern and gives the selection rule. A also includes the claim \"TfL buses are approximated by operator,\" but B includes it too, and it appears in neither the tool output nor the question. B states the selection rule and presents the numbers clearly in tables."
+    },
+    {
+     "order": [
+      "deepseek-v4.1-flash",
+      "claude-haiku-5-5"
+     ],
+     "better": "B",
+     "winner": "claude-haiku-5-5",
+     "reason": "Both give the correct design day (2026-10-22) and count (5,559 of 9,135, 60.9%). B stays within the tool outputs and covers the key caveats: estimated distances, inferred blocks, and the 28-day window. A adds two unsupported claims: that deadhead exclusion makes the result 'optimistic', and that the hardest day is the 'hardest winter pattern in the built timetable'. A also states 'TfL operations are approximated by operator', which no tool output supports, and B repeats that same line. B also correctly explains why TTC's own winter figure was not used. A's 'optimistic' remark is a reasonable inference, but B is the more faithful and cleaner answer."
+    }
+   ]
+  },
+  {
+   "task_id": "london-06-sources",
+   "pair": [
+    "claude-sonnet-5-5",
+    "deepseek-v4.1-flash"
+   ],
+   "flipped": true,
+   "verdicts": [
+    {
+     "order": [
+      "claude-sonnet-5-5",
+      "deepseek-v4.1-flash"
+     ],
+     "better": "A",
+     "winner": "claude-sonnet-5-5",
+     "reason": "The only tool output shown is two Tampere passages with nothing from TfL's Bus action plan. Both answers cite TfL content that isn't in the output, so neither is grounded. B is worse because it adds more unsupported specifics: the 2034 target moved from 2037, 600,000 tonnes, p. 73, and a 2026-10-22 index snapshot date. It also wrongly says the 2034 target is the formal one. A makes fewer unsupported claims, though it also invents TfL passages and page numbers. B does correctly flag that the Tampere results aren't about London."
+    },
+    {
+     "order": [
+      "deepseek-v4.1-flash",
+      "claude-sonnet-5-5"
+     ],
+     "better": "A",
+     "winner": "deepseek-v4.1-flash",
+     "reason": "A correctly reports the plan's 2034 target (brought forward from 2037) and presents 2030 as the Mayor's ambition, matching the p. 73 fact card. B wrongly states that the plan gives 2030 as the fleet date, omitting the 2034 target. A also flags that the Tampere results are not about London. A's snapshot-date remark is extraneous but harmless."
+    }
+   ]
+  }
+ ]
+}
