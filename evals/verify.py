@@ -23,7 +23,12 @@ A task passes only if those three checks pass. Reported beside them, not part of
 - disclosure: when a tool flagged distances as ESTIMATED and blocks as INFERRED (London), the
   answer says both.
 All text is normalise()d first: Unicode escapes decoded; typographic hyphens, minus signs and
-no-break or thin spaces made plain.
+no-break or thin spaces made plain; numbers in words turned into digits.
+Units (eval-v1.3): an answer number only matches a source number whose unit agrees (220.7 km
+doesn't back "220.7 minutes"); a unit written once covers a list before it ("234 and 203 km");
+a bare number in the question or context can't back a number with a unit. IDs named in tool
+calls are never quantities. A small count (0-10) is ignored only when bare and unhedged.
+evals/self_hack.py holds adversarial answers that probe what this can and can't catch.
 """
 
 import json
@@ -59,9 +64,37 @@ _PLAIN = str.maketrans({"‐": "-", "‑": "-", "‒": "-", "−": "-",
 _ESCAPE = re.compile(r"\\u([0-9a-fA-F]{4})")
 
 
+_WORD_VALUES = {w: i for i, w in enumerate(
+    ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"])}
+_WORD_VALUES.update({w: 10 * i for i, w in enumerate(
+    ["twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"], start=2)})
+_WORD_SCALES = {"hundred": 100, "thousand": 1000, "million": 10**6, "billion": 10**9}
+_NUMBER_WORD = "|".join(list(_WORD_VALUES) + list(_WORD_SCALES))
+_NUMBER_WORDS = re.compile(rf"\b(?:{_NUMBER_WORD})(?:(?:\s+and\s+|[\s-]+)(?:{_NUMBER_WORD}))*\b",
+                           re.IGNORECASE)
+
+
+def _words_to_number(match):
+    """'one hundred and ninety' -> '190'; a lone scale word ('million') is left as it is."""
+    words = re.split(r"[\s-]+", match.group(0).lower().replace(" and ", " "))
+    if words[0] in _WORD_SCALES:
+        return match.group(0)
+    total = current = 0
+    for word in words:
+        if word in _WORD_VALUES:
+            current += _WORD_VALUES[word]
+        elif word == "hundred":
+            current *= 100
+        else:
+            total, current = total + current * _WORD_SCALES[word], 0
+    return str(total + current)
+
+
 def normalise(text):
-    """Text with Unicode escapes decoded and typographic hyphens, minus signs and spaces made plain."""
-    return _ESCAPE.sub(lambda m: chr(int(m.group(1), 16)), str(text)).translate(_PLAIN)
+    """Text with Unicode escapes decoded, typographic hyphens, minus signs and spaces made plain,
+    and numbers written in words turned into digits ("ninety kilometres" -> "90 kilometres")."""
+    text = _ESCAPE.sub(lambda m: chr(int(m.group(1), 16)), str(text)).translate(_PLAIN)
+    return _NUMBER_WORDS.sub(_words_to_number, text)
 
 
 def parse_numbers(text):
@@ -97,17 +130,35 @@ def matches(answer_value, half_unit, target, extra_tol=1e-9):
 # Units an answer's number may carry, by family, and the conversion factors within each family.
 # A conversion is only considered when the answer's number has a unit of that family, so a
 # number can't be "explained" by an unrelated factor (e.g. 42.5 = 153 / 3.6 for a percentage).
+# One qualifying word may sit between a number and its unit ("161.4 revenue km").
 _UNIT = re.compile(
-    r"\s*-?\s*(%|per ?cent|kwh|mwh|gwh|mj|kw|mw|gw|km|miles?|mi|minutes?|mins?|min|"
-    r"hours?|hrs?|h)(?![a-z])", re.IGNORECASE)
+    r"\s*-?\s*(?:[a-z]+\s+)?(%|per ?cent|kwh|mwh|gwh|mj|kw|mw|gw|km|kilometres?|kilometers?|"
+    r"miles?|mi|minutes?|mins?|min|hours?|hrs?|h)(?![a-z])", re.IGNORECASE)
 UNIT_FAMILIES = {
     "percent": ({"%", "percent", "per cent"}, ()),
     "energy": ({"kwh", "mwh", "gwh", "mj"}, (1000, 1e6, 3.6, 3600)),
     "power": ({"kw", "mw", "gw"}, (1000, 1e6)),
-    "distance": ({"km", "mile", "miles", "mi"}, (1.609344, 1000)),
+    "distance": ({"km", "kilometre", "kilometres", "kilometer", "kilometers", "mile", "miles", "mi"},
+                 (1.609344, 1000)),
     "time": ({"min", "mins", "minute", "minutes", "h", "hr", "hrs", "hour", "hours"}, (60,)),
 }
 _PERCENT_KEY = re.compile(r'"[^"]*(?:pct|percent)[^"]*"\s*:\s*$', re.IGNORECASE)
+# A JSON value's unit, from its key's suffix ("daily_km": 52983.0 is a distance).
+_KEY_UNIT = re.compile(r'"[^"]*_(km|kwh|mwh|kw|mw|minutes|hours)"\s*:\s*$', re.IGNORECASE)
+_KEY_FAMILY = {"km": "distance", "kwh": "energy", "mwh": "energy", "kw": "power", "mw": "power",
+               "minutes": "time", "hours": "time"}
+# An ID is never a quantity: JSON "..._id" values in tool calls are ignored wherever they appear.
+_ID_VALUE = re.compile(r'"\w*_id"\s*:\s*"([^"]*)"')
+_LIST_JOIN = re.compile(r"\s*(?:,|and|or|to|-|–)\s*", re.IGNORECASE)
+# A hedge before a number marks it as an estimate, never as prose ("roughly 2", "about 9").
+_HEDGE = re.compile(r"(?:about|around|roughly|approximately|approx\.?|nearly|almost|some|~|≈)\s*$",
+                    re.IGNORECASE)
+
+
+def compatible(answer_family, families):
+    """An answer number's unit agrees with a source number's: either has no unit, or they match."""
+    return (answer_family in (None, "multiplier") or not families or None in families
+            or answer_family in families)
 
 
 def _unit_family(text, end):
@@ -119,16 +170,24 @@ def _unit_family(text, end):
 
 
 def parse_with_units(text):
-    """[(value, half_unit, raw, unit_family)]; a JSON value under a "pct"/"percent" key counts
-    as a percentage."""
+    """[(value, half_unit, raw, unit_family, start)]; a JSON value under a "pct"/"percent" key
+    counts as a percentage, and one under a unit-suffixed key ("..._km") has that unit."""
     found = []
     for value, half_unit, start, raw in parse_numbers(text):
         family = _unit_family(text, start + len(raw))
         if family is None and _PERCENT_KEY.search(text[:start]):
             family = "percent"
+        if family is None and (key := _KEY_UNIT.search(text[:start])):
+            family = _KEY_FAMILY[key.group(1).lower()]
         if family is None and start > 0 and text[start - 1] in "x×":
             family = "multiplier"  # written as "x1.425"
-        found.append((value, half_unit, raw, family))
+        found.append((value, half_unit, raw, family, start))
+    # A unit written once covers a list or range before it: "234 and 203 km", "8-10 h".
+    for i in range(len(found) - 2, -1, -1):
+        value, half_unit, raw, family, start = found[i]
+        following = found[i + 1]
+        if family is None and following[3] and _LIST_JOIN.fullmatch(text[start + len(raw):following[4]]):
+            found[i] = (value, half_unit, raw, following[3], start)
     return found
 
 
@@ -177,19 +236,39 @@ def number_match(value, half_unit, raw, target):
     return None
 
 
-def tool_numbers(tool_calls):
-    """(every number in every tool call's input and result, {number: "percent"/"multiplier"})."""
-    numbers, kinds = set(), {}
+def tool_ids(tool_calls):
+    """Every ID a tool call names (JSON "..._id" values in its input and result)."""
+    return {m.group(1) for call in tool_calls
+            for text in (json.dumps(call.get("input", {})), normalise(call.get("result", "")))
+            for m in _ID_VALUE.finditer(text) if m.group(1)}
+
+
+def _strip_tokens(text, tokens):
+    for token in sorted(tokens, key=len, reverse=True):
+        if token:
+            text = text.replace(token, " ")
+    return text
+
+
+def tool_numbers(tool_calls, ignore_tokens=()):
+    """(every number in every tool call's input and result, {number: "percent"/"multiplier"},
+    {number: set of the unit families it appeared with}). IDs (JSON "..._id" values and the
+    task's ignore_tokens) are not numbers."""
+    numbers, kinds, families = set(), {}, {}
     for call in tool_calls:
         result = normalise(call.get("result", ""))
         for name in _FIELD_NAME.findall(result):
-            numbers.update(float(d) for d in re.findall(r"\d+", name))
+            for d in re.findall(r"\d+", name):
+                numbers.add(float(d))
+                families.setdefault(float(d), set()).add(None)
         for text in (json.dumps(call.get("input", {})), result):
-            for value, _, _, family in parse_with_units(_URL.sub(" ", text)):
+            text = _strip_tokens(text, set(ignore_tokens) | tool_ids(tool_calls))
+            for value, _, _, family, _ in parse_with_units(text):
                 numbers.add(value)
+                families.setdefault(value, set()).add(family)
                 if family in ("percent", "multiplier"):
                     kinds[value] = family
-    return numbers, kinds
+    return numbers, kinds, families
 
 
 def check_steps(task, tool_calls):
@@ -225,7 +304,7 @@ def _no_figure_reported(item, answer, tool_calls, ignore_tokens):
         and NO_DATA[item["type"]] in normalise(call.get("result", ""))
         for call in tool_calls
     )
-    figures = [raw for _, _, raw, family in parse_with_units(_strip_ignored(answer, ignore_tokens))
+    figures = [raw for _, _, raw, family, _ in parse_with_units(_strip_ignored(answer, ignore_tokens))
                if family in ("distance", "time")]
     return reported and not figures
 
@@ -282,12 +361,16 @@ def check_end_state(task, answer, tool_calls=(), context=""):
     """Oracle numbers and dates present, and required outcomes shown structurally."""
     answer = normalise(answer)
     missing = []
-    ignore = task.get("ignore_tokens", [])
-    numbers = parse_numbers(_strip_ignored(answer, ignore))
+    ignore = set(task.get("ignore_tokens", [])) | tool_ids(tool_calls)
+    numbers = parse_with_units(_strip_ignored(answer, ignore))
+    _, _, families = tool_numbers(tool_calls, ignore)
     for item in task.get("oracle", []):
         if item["type"] == "number":
+            # Same match as the unsupported check: precision or rounding, and the answer's unit
+            # must agree with the unit the tool gave that number ("220.7 minutes" isn't 220.7 km).
             ok = any(
-                all(any(number_match(v, h, raw, target) for v, h, _, raw in numbers) for target in option)
+                all(any(number_match(v, h, raw, target) and compatible(family, families.get(target))
+                        for v, h, raw, family, _ in numbers) for target in option)
                 for option in item["accept"]
             )
         elif item["type"] == "date":
@@ -307,9 +390,12 @@ def check_end_state(task, answer, tool_calls=(), context=""):
     return {"pass": not missing, "missing": missing}
 
 
-def classify(value, half_unit, raw, family, supported, kinds=None):
-    """("supported", None, None), ("derived", rule, source number) or ("unsupported", None, None)."""
-    levels = {t: number_match(value, half_unit, raw, t) for t in supported}
+def classify(value, half_unit, raw, family, supported, kinds=None, families=None):
+    """("supported", None, None), ("derived", rule, source number) or ("unsupported", None, None).
+    A source number only counts if its unit agrees with the answer's (families: number -> units)."""
+    families = families or {}
+    levels = {t: number_match(value, half_unit, raw, t) for t in supported
+              if compatible(family, families.get(t))}
     if "exact" in levels.values():
         return "supported", None, None
     source = next((t for t, level in levels.items() if level == "rounded"), None)
@@ -318,6 +404,8 @@ def classify(value, half_unit, raw, family, supported, kinds=None):
     tolerance = _rounding_half_unit(raw, half_unit) or half_unit
     for t in sorted(supported):
         for rule, candidate in _derivations(t, (kinds or {}).get(t), family):
+            if rule == "unit conversion" and not compatible(family, families.get(t)):
+                continue
             if matches(value, tolerance, candidate):
                 return "derived", rule, t
     return "unsupported", None, None
@@ -328,20 +416,27 @@ def check_unsupported(task, answer, tool_calls, context=""):
 
     context: the agent's tool descriptions, system prompt and source entries; numbers stated
     there count as supported."""
-    supported, kinds = tool_numbers(tool_calls)
-    for text in (_strip_ignored(normalise(task["question"])), _URL.sub(" ", normalise(context))):
-        for value, _, _, family in parse_with_units(text):
+    ignore = set(task.get("ignore_tokens", [])) | tool_ids(tool_calls)
+    supported, kinds, families = tool_numbers(tool_calls, ignore)
+    for text in (_strip_ignored(normalise(task["question"]), ignore), _URL.sub(" ", normalise(context))):
+        for value, _, _, family, _ in parse_with_units(text):
             supported.add(value)
+            # A bare number in the question or context (a page number, a count) can't back an
+            # answer number that has a unit; only a tool output's bare number can.
+            families.setdefault(value, set()).add(family or "bare")
             if family in ("percent", "multiplier"):
                 kinds[value] = family
     unsupported, derived = [], []
-    for value, half_unit, raw, family in parse_with_units(
-            _strip_ignored(normalise(answer), task.get("ignore_tokens", []))):
-        if value.is_integer() and 0 <= value <= SMALL_COUNT and half_unit <= 0.5:
+    text = _strip_ignored(normalise(answer), ignore)
+    for value, half_unit, raw, family, start in parse_with_units(text):
+        # A small bare count is prose ("the 5 longest"), unless it has a unit or a hedge
+        # ("roughly 2 kWh", "about 9 passengers"): then it is a figure like any other.
+        if (value.is_integer() and 0 <= value <= SMALL_COUNT and half_unit <= 0.5
+                and family is None and not _HEDGE.search(text[:start])):
             continue
         if 1900 <= value <= 2100 and value.is_integer():
             continue  # a year
-        level, rule, source = classify(value, half_unit, raw, family, supported, kinds)
+        level, rule, source = classify(value, half_unit, raw, family, supported, kinds, families)
         if level == "derived":
             derived.append({"number": raw.strip(), "rule": rule, "from": source})
         elif level == "unsupported":

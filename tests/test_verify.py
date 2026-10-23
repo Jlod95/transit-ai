@@ -240,3 +240,51 @@ def test_disclosure_needed_only_when_tools_flag_estimates():
     result = check_disclosure("It drives 201.5 km (an estimate).", london)
     assert not result["pass"] and result["missing"] == ["infer"]
     assert check_disclosure("It drives 80.5 km.", [DISTANCE]) == {"applies": False, "pass": True}
+
+
+# --- eval-v1.3: hardening from the self-hack (evals/self_hack.py) ---
+
+BOTH_CALLS = [
+    {"name": "get_block_distance", "input": {"agency": "halifax", "block_id": "722231", "date": "2026-09-10"},
+     "result": "Block 722231 drives 220.7 revenue km on 2026-09-10."},
+    {"name": "get_block_duration", "input": {"agency": "halifax", "block_id": "722231", "date": "2026-09-10"},
+     "result": "Block 722231 is in service for 12 h 2 min on 2026-09-10."},
+]
+BOTH_TASK = {"id": "fake-both", "question": "Distance and service time for block 722231?",
+             "expected_calls": [], "ignore_tokens": ["722231"],
+             "oracle": [{"type": "number", "label": "km", "accept": [[220.7]]},
+                        {"type": "number", "label": "duration", "accept": [[12, 2], [722]]}]}
+
+
+def test_numbers_in_words_are_read():
+    result = check_unsupported(BOTH_TASK, "It drives 220.7 km, about one hundred and ninety more with deadhead.",
+                               BOTH_CALLS)
+    assert result["numbers"] == ["190"]
+
+
+def test_units_must_agree_with_the_tool():
+    swapped = "Block 722231 drives 722 km and is in service for 220.7 minutes."
+    assert not check_end_state(BOTH_TASK, swapped, BOTH_CALLS)["pass"]  # 220.7 is km, not minutes
+    assert "220.7" in check_unsupported(BOTH_TASK, swapped, BOTH_CALLS)["numbers"]
+    assert check_end_state(BOTH_TASK, "It drives 220.7 km in 12 h 2 min.", BOTH_CALLS)["pass"]
+
+
+def test_ids_are_never_quantities_but_may_be_quoted():
+    calls = [{"name": "get_fleet_feasibility", "input": {"agency": "halifax"},
+              "result": '{"within_range": 331, "longest_blocks": [{"block_id": "722134", "km": 457.5}]}'}]
+    # 722 km is not "722134 / 1000"...
+    assert check_unsupported(COST_TASK, "That block drives 722 km.", calls)["numbers"] == ["722"]
+    # ...and quoting the block ID the tool gave is fine.
+    assert check_unsupported(COST_TASK, "The longest is block 722134 at 457.5 km.", calls)["pass"]
+
+
+def test_small_counts_with_a_unit_or_hedge_are_figures():
+    task = {"id": "fake-abstain", "question": "Passengers at rush hour?", "expected_calls": []}
+    assert check_unsupported(task, "The 3 tools I have don't cover ridership.", [])["pass"]
+    assert check_unsupported(task, "A bus carries about 9 passengers.", [])["numbers"] == ["9"]
+    assert check_unsupported(task, "It uses 2 kWh per passenger.", [])["numbers"] == ["2"]
+
+
+def test_bare_context_number_cannot_back_a_unit_but_a_listed_unit_carries():
+    assert check_unsupported(COST_TASK, "That is 55 km.", [], context="see p. 55")["numbers"] == ["55"]
+    assert check_unsupported(COST_TASK, "Range is about 234 km.", [], context="234 and 203 km")["pass"]
