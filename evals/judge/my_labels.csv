@@ -1,21 +1,21 @@
 id,conclusion,answers_question,caveats,no_misleading,clear,note
-1,,,,,,
-2,,,,,,
-3,,,,,,
-4,,,,,,
-5,,,,,,
-6,,,,,,
-7,,,,,,
-8,,,,,,
-9,,,,,,
-10,,,,,,
-11,,,,,,
-12,,,,,,
-13,,,,,,
-14,,,,,,
-15,,,,,,
-16,,,,,,
-17,,,,,,
-18,,,,,,
-19,,,,,,
-20,,,,,,
+1,Y,Y,Y,Y,N,"Numbers match. Says 'winter design day: Monday 24 August' without explaining that season only sets energy use and the date is the earliest day of the weekday pattern; confusing for a planner. Ten dates and longest blocks not in shown output (verify)"
+2,Y,Y,Y,Y,Y,"Longest blocks not in shown output (verify)"
+3,Y,Y,Y,N,Y,"'284 replacements' is the model's own subtraction (414-130); not in the cost tool output"
+4,Y,Y,Y,N,Y,"'about 0.03 above' is self-computed. Also says the design day is the one with the most blocks in service at the same moment giving 1172; but 1172 is blocks that day and 799 is the peak at once (blocks are not buses)"
+5,Y,Y,Y,Y,Y,"Correctly declines; date checks out (28 Nov 2026 is a Saturday)"
+6,Y,Y,Y,Y,Y,"Good abstention; Finnish figure clearly marked as not applicable and cited"
+7,Y,Y,Y,Y,Y,"'Schedules are guessed... worked out route by route' covers inferred by meaning"
+8,Y,Y,Y,Y,Y,"Estimated and inferred both stated; declines payback"
+9,Y,Y,Y,Y,Y,"1.46 is rounding of 1.458. Ten dates not in shown output (verify)"
+10,Y,Y,Y,Y,Y,"Last line about the tool not giving a snapshot is odd but harmless"
+11,Y,Y,Y,Y,Y,"B5/B20/gasoline figures not in shown output; likely from the same fact card (verify)"
+12,Y,Y,Y,N,Y,"'about 2.5 times the winter range' is self-computed"
+13,Y,Y,Y,Y,Y,"Correctly declines; states the window"
+14,N,Y,Y,N,N,"Blames the ID format when the block simply doesn't run that day; Dublin IDs aren't like 722145 or 25-3; wrong explanation a planner would have to remove"
+15,Y,Y,Y,Y,Y,"Placeholder window flagged; notes smart charging could lower the peak"
+16,Y,Y,Y,Y,Y,"Estimated and inferred stated; notes summer energy on a November date"
+17,Y,Y,Y,N,Y,"Claims Halifax blocks can be numbered like '25-3' (that's a London-style ID); unsupported"
+18,N,N,Y,N,N,"Opens with 'context... not inputs to the figures above' but no headline figures appear above; 92.1 MWh and 15.35 MW only show up in passing. Calls the winter assumption 'conservative' when its own evidence (2.1 vs 1.74 kWh/km) shows it's optimistic"
+19,Y,Y,Y,Y,Y,"'Pieced together by linking trips' covers inferred by meaning"
+20,Y,Y,Y,Y,Y,""

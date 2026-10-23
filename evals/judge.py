@@ -43,7 +43,8 @@ CRITERIA = {
                "estimated distances or inferred blocks, placeholder assumptions, data limits "
                "(e.g. deadhead excluded, dates outside the timetable). N if one is missing.",
     "no_misleading": "No misleading or unsupported claims: every figure and statement is backed by "
-                     "the tool output or plainly marked as general knowledge, with no invented numbers.",
+                     "the tool output or the assistant's instructions, or plainly marked as general "
+                     "knowledge, with no invented numbers.",
     "clear": "Clear enough for a transit planner to forward as it is, without rewriting.",
 }
 LABEL_COLUMNS = ["id", *CRITERIA, "note"]
@@ -85,13 +86,14 @@ BIAS_PAIRS = [
     ("london-04-design_day", "claude-haiku-5-5", "deepseek-v4.1-flash"),
     ("london-06-sources", "claude-sonnet-5-5", "deepseek-v4.1-flash"),
 ]
-MAX_TOOL_RESULT = 4000  # characters of each tool output shown to the judge
 
 SYSTEM = (
     "You review answers from a transit electrification assistant. The assistant answers a "
     "planner's question by calling tools that run tested code on public timetable data; the "
-    "tool outputs are the ground truth. Judge only against the question and the tool outputs, "
-    "not your own knowledge of the agency. Be strict: a planner may forward the answer as it is."
+    "tool outputs are the ground truth. The assistant's own instructions (system prompt, tool "
+    "descriptions, source entries) are also given: statements taken from them are supported. "
+    "Judge only against the question, the instructions and the tool outputs, not your own "
+    "knowledge of the agency. Be strict: a planner may forward the answer as it is."
 )
 
 
@@ -100,8 +102,11 @@ def tasks_by_id():
 
 
 def record(model, task_id, attempt):
+    """One saved attempt, with the agent context (system prompt, tool descriptions, source
+    entries) its run was graded against, under "context"."""
     run = json.loads((RESULTS / RUNS[model]).read_text(encoding="utf-8"))
-    return next(r for r in run["records"] if r["task_id"] == task_id and r["attempt"] == attempt)
+    rec = next(r for r in run["records"] if r["task_id"] == task_id and r["attempt"] == attempt)
+    return {**rec, "context": run["contexts"][rec["agency"]]}
 
 
 def key_numbers(result):
@@ -121,11 +126,13 @@ def key_numbers(result):
 
 
 def evidence(task, rec):
-    """The question, agency and full tool outputs, as the judge sees them."""
+    """What the judge sees: the assistant's instructions, the question and agency, and every tool
+    output in full (the same evidence the code grader counts as support)."""
     calls = "\n\n".join(
-        f"Tool call {i}: {c['name']}({json.dumps(c['input'])})\nOutput:\n{c['result'][:MAX_TOOL_RESULT]}"
+        f"Tool call {i}: {c['name']}({json.dumps(c['input'])})\nOutput:\n{c['result']}"
         for i, c in enumerate(rec["tool_calls"], 1)) or "(no tool calls)"
-    return f"Agency: {task['agency']}\nQuestion: {task['question']}\n\n{calls}"
+    return (f"<assistant_instructions>\n{rec['context']}\n</assistant_instructions>\n\n"
+            f"Agency: {task['agency']}\nQuestion: {task['question']}\n\n{calls}")
 
 
 def ask_json(client, prompt, schema):
