@@ -31,7 +31,9 @@ from src.summaries import design_day, load_summary, service_day_for
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
-MODEL = "claude-opus-5-5"
+# Production model: Sonnet 5.5 passed 90/90 attempts (pass^3 30/30) on the eval-v1.3 benchmark
+# at under half of Opus 5.5's cost per attempt (evals/results/20261022-benchmark-all-k3.md).
+MODEL = "claude-sonnet-5-5"
 SUMMARY_DIR = PROJECT_ROOT / os.environ.get("SUMMARY_DIR", "data/summaries")
 # A relative FEED_PATH is taken from the project root; an absolute one is used as is.
 FEED_PATH_SETTING = os.environ.get("FEED_PATH", "data/raw/halifax.zip")
