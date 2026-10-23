@@ -238,6 +238,16 @@ minutes to arrive.
   az monitor log-analytics query --workspace $WS_ID -o table --analytics-query "ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'transit-ai' and Log_s has '/ask' | project TimeGenerated, Log_s | order by TimeGenerated desc | take 20"
   ```
 
+### Pulling all feedback
+
+Each thumbs up/down from the demo page is one log line, `FEEDBACK {json}` (timestamp, agency,
+question, answer, tool calls, rating, comment; no IP address). This saves every one from the
+last 30 days (the workspace's retention) to `feedback.json`, oldest first:
+
+```powershell
+az monitor log-analytics query --workspace (az monitor log-analytics workspace show -g rg-transit-ai -n log-transit-ai --query customerId -o tsv) --timespan P30D -o json --analytics-query "ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'transit-ai' and Log_s has 'FEEDBACK {' | extend feedback = parse_json(substring(Log_s, indexof(Log_s, 'FEEDBACK {') + 9)) | project TimeGenerated, agency = tostring(feedback.agency), rating = tostring(feedback.rating), comment = tostring(feedback.comment), question = tostring(feedback.question), feedback | order by TimeGenerated asc" | Out-File -Encoding utf8 feedback.json
+```
+
 ## 12. Deploying a new version
 
 Commit, then build and push with the new commit ID as the tag, and point the app at it:
