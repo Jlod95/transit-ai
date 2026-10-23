@@ -136,8 +136,8 @@ def main(out, paths):
     body = ["# Model benchmark: all 30 tasks", "",
             ("pass@k: a task passes if any of its k attempts passes. pass^k: only if all k pass. "
             "Cost and latency are per attempt (one answered question). Re-graded runs show the "
-            "grade under every grader version (v1, v1.1, v1.2) side by side; the answers are the same. "
-            "Disclosure (v1.2, not part of the pass): London answers built on tool output flagged "
+            "grade under every grader version (v1, v1.1, ...) side by side; the answers are the same. "
+            "Disclosure (from v1.2, not part of the pass): London answers built on tool output flagged "
             "ESTIMATED / INFERRED must say distances are estimated and blocks inferred; shown as "
             "passed/applicable attempts. "
             "Cost per passed attempt = total cost / attempts passed."), ""]
