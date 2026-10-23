@@ -140,12 +140,23 @@
     }
     .estimate { color: var(--note-text); background: var(--note-bg); border-radius: 6px;
       padding: 6px 10px; margin: 0 0 14px; font-size: 0.9rem; }
+    .banner { background: var(--note-bg); color: var(--note-text); border-radius: 8px;
+      padding: 8px 12px; margin: 0 0 14px; font-size: 0.9rem; }
+    .feedback { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .feedback .rate { padding: 4px 10px; font-size: 1.1rem; line-height: 1; }
+    .feedback .rate[aria-pressed="true"] { border-color: var(--accent); background: var(--chip); }
+    .feedback input { flex: 1 1 180px; min-width: 0; padding: 6px 10px; font: inherit; color: inherit;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
+    .feedback .hint { flex-basis: 100%; margin: 0; }
     [hidden] { display: none !important; }
   </style>
 </head>
 <body>
 <main>
   <h1>Transit AI: could an electric bus run it?</h1>
+  <p class="banner" role="note">Proof of concept: figures are first-pass estimates from public data;
+    London uses estimated distances and inferred schedules. Feedback welcome.</p>
   <p id="lead" class="lead">
     A first-pass check of which Halifax Transit bus blocks could run on one overnight charge,
     using public GTFS schedule data (valid to 29 Nov 2026) and battery figures from published bus trials.
@@ -189,6 +200,16 @@
         code on the timetable data, and the model wrote the answer from what the tools returned.</p>
       <ol id="steps" class="steps"></ol>
     </details>
+    <form id="feedback" class="feedback" aria-label="Rate this answer">
+      <span>Was this useful?</span>
+      <button type="button" class="rate" data-rating="up" aria-pressed="false" aria-label="Thumbs up">👍</button>
+      <button type="button" class="rate" data-rating="down" aria-pressed="false" aria-label="Thumbs down">👎</button>
+      <input id="feedback-comment" type="text" maxlength="200" placeholder="Optional one-line comment"
+        aria-label="Optional comment">
+      <button id="feedback-send" type="submit" disabled>Send</button>
+      <p id="feedback-status" class="hint" aria-live="polite">Sending feedback records the question,
+        the answer and your comment (no IP address).</p>
+    </form>
   </section>
 
   <div class="card note">
@@ -386,6 +407,8 @@
         `Q (${agencySelect.options[agencySelect.selectedIndex].text}): ${question}`;
       document.getElementById("answer").innerHTML = renderMarkdown(data.answer || "");
       renderSteps(data.tool_calls || [], data.rounds || 0);
+      resetFeedback({ agency: agencySelect.value, question, answer: data.answer || "",
+                      tool_calls: data.tool_calls || [] });
       document.getElementById("steps-box").open = false;
       result.hidden = false;
       result.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -430,6 +453,57 @@
       examplesBox.append(button);
     }
   }
+
+  // Thumbs up/down and an optional comment on the answer shown, sent to /feedback.
+  const feedbackForm = document.getElementById("feedback");
+  const feedbackSend = document.getElementById("feedback-send");
+  const feedbackStatus = document.getElementById("feedback-status");
+  const feedbackComment = document.getElementById("feedback-comment");
+  const rateButtons = feedbackForm.querySelectorAll(".rate");
+  let shownAnswer = null;
+  let rating = null;
+
+  function resetFeedback(answer) {
+    shownAnswer = answer;
+    rating = null;
+    rateButtons.forEach((b) => { b.setAttribute("aria-pressed", "false"); b.disabled = false; });
+    feedbackComment.value = "";
+    feedbackComment.disabled = false;
+    feedbackSend.disabled = true;
+    feedbackStatus.textContent = "Sending feedback records the question, the answer and your comment (no IP address).";
+  }
+
+  rateButtons.forEach((button) => button.addEventListener("click", () => {
+    rating = button.dataset.rating;
+    rateButtons.forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
+    feedbackSend.disabled = false;
+  }));
+
+  feedbackForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!rating || !shownAnswer) return;
+    feedbackSend.disabled = true;
+    try {
+      const response = await fetch("/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...shownAnswer, rating, comment: feedbackComment.value.trim() }),
+      });
+      if (response.ok) {
+        feedbackStatus.textContent = "Thanks: your feedback was sent.";
+        rateButtons.forEach((b) => { b.disabled = true; });
+        feedbackComment.disabled = true;
+      } else {
+        feedbackStatus.textContent = response.status === 429
+          ? "Too much feedback for now; please try again later."
+          : "Couldn't send feedback; please try again.";
+        feedbackSend.disabled = false;
+      }
+    } catch {
+      feedbackStatus.textContent = "Couldn't reach the server; please try again.";
+      feedbackSend.disabled = false;
+    }
+  });
 
   agencySelect.addEventListener("change", () => {
     result.hidden = true;
