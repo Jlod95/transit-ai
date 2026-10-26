@@ -6,35 +6,21 @@
   <title>Transit AI – Electric Bus Feasibility Check</title>
   <meta name="description" content="A first-pass check of which Halifax Transit bus blocks could run on one overnight charge.">
   <style>
+    /* One dark theme for every visitor, whatever their device's light/dark setting. */
     :root {
-      --bg: #f6f7f9;
-      --card: #ffffff;
-      --text: #1d2330;
-      --muted: #5b6475;
-      --border: #dde1e8;
-      --accent: #0f6e5f;
-      --accent-text: #ffffff;
-      --chip: #e9f3f1;
-      --error-bg: #fdf0ef;
-      --error-text: #8a2a20;
-      --note-bg: #fff8e6;
-      --note-text: #6b4e00;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #14171c;
-        --card: #1c2027;
-        --text: #e6e9ef;
-        --muted: #a2aab8;
-        --border: #313744;
-        --accent: #3fb59f;
-        --accent-text: #0d1512;
-        --chip: #1f2f2c;
-        --error-bg: #3a1f1c;
-        --error-text: #f3b4ab;
-        --note-bg: #352c14;
-        --note-text: #f0d68a;
-      }
+      color-scheme: dark;
+      --bg: #14171c;
+      --card: #1c2027;
+      --text: #e6e9ef;
+      --muted: #a2aab8;
+      --border: #313744;
+      --accent: #3fb59f;
+      --accent-text: #0d1512;
+      --chip: #1f2f2c;
+      --error-bg: #3a1f1c;
+      --error-text: #f3b4ab;
+      --note-bg: #352c14;
+      --note-text: #f0d68a;
     }
     * { box-sizing: border-box; }
     body {
