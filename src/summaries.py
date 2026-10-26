@@ -27,6 +27,7 @@ from src.blocks import (
     _read_table,
     _services_on,
     _trip_lengths_and_times,
+    check_trip_speeds,
 )
 from src.estimates import infer_blocks, road_factor_from, shape_lengths_km, stop_coords, walk_trips
 
@@ -214,6 +215,7 @@ class _FeedPart:
         else:
             raise ValueError(f"Unknown block method {self.blocks_method!r}")
         distances = _block_distances(trip_block, self.lengths)
+        check_trip_speeds(trip_block, self.lengths, self.starts, self.ends)  # speed guard applies
         spans = _block_spans(trip_block, self.starts, self.ends)
         # start/end: seconds after the service day's midnight (can pass 24:00 for late blocks).
         return {

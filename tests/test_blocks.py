@@ -7,10 +7,13 @@ from conftest import zip_mini_feed
 from src.blocks import (
     BlockCoverageError,
     MissingDistanceError,
+    TripSpeedError,
     daily_block_distance,
     daily_block_duration,
     gtfs_time_to_seconds,
+    trip_speed_problems,
 )
+from src.summaries import build_summary
 
 HALIFAX_FEED = Path(__file__).parent.parent / "data" / "raw" / "halifax.zip"
 
@@ -67,6 +70,19 @@ def mini_feed_t5_without_block(tmp_path):
         return rows
 
     return zip_mini_feed(tmp_path / "mini_feed_t5_without_block.zip", drop_block)
+
+
+def mini_feed_t4_scaled(tmp_path, factor):
+    """The mini feed with bus trip T4's shape_dist_traveled values multiplied by factor."""
+
+    def scale_t4(name, rows):
+        if name == "stop_times.txt":
+            for row in rows:
+                if row["trip_id"] == "T4" and row["shape_dist_traveled"]:
+                    row["shape_dist_traveled"] = f"{float(row['shape_dist_traveled']) * factor:g}"
+        return rows
+
+    return zip_mini_feed(tmp_path / f"mini_feed_t4_x{factor:g}.zip", scale_t4)
 
 
 def test_mini_feed_weekday_totals(mini_feed):
@@ -133,3 +149,37 @@ def test_block_722145_duration_on_a_weekday():
     # First departure 5:32, last arrival 8:48.
     durations = daily_block_duration(HALIFAX_FEED, date(2026, 10, 14))
     assert durations["722145"] == pytest.approx(196)
+
+
+# --- Speed guard: km / scheduled hours must be plausible for a bus trip ---
+
+
+def test_normal_trip_speed_passes(mini_feed):
+    # T4 drives 15 km in 45 min = 20 km/h, inside 3-70 km/h, as does every mini-feed bus trip.
+    assert trip_speed_problems({"T4": "B"}, {"T4": 15.0}, {"T4": 8 * 3600}, {"T4": 8 * 3600 + 45 * 60}) == {}
+    assert daily_block_distance(mini_feed, date(2026, 10, 14)) == pytest.approx({"A": 25.0, "B": 30.0})
+
+
+def test_zero_km_trip_stops_the_build(tmp_path):
+    # Without the guard, T4 would count as 0 km and block B would silently read 15 km, not 30.
+    feed = mini_feed_t4_scaled(tmp_path, 0)
+    with pytest.raises(TripSpeedError) as error:
+        daily_block_distance(feed, date(2026, 10, 14))
+    assert error.value.problems == {"T4": {"block": "B", "km": 0.0, "minutes": 45.0, "kmh": 0.0}}
+    assert "trip T4 (block B: 0 km in 45 min = 0.0 km/h)" in str(error.value)
+    with pytest.raises(TripSpeedError):
+        build_summary(feed, "mini")  # the summary build stops too
+
+
+def test_distance_1000_times_too_large_stops_the_build(tmp_path):
+    # Metres read as km: 15,000 "km" in 45 min = 20,000 km/h.
+    with pytest.raises(TripSpeedError) as error:
+        daily_block_distance(mini_feed_t4_scaled(tmp_path, 1000), date(2026, 10, 14))
+    assert error.value.problems["T4"]["kmh"] == 20000.0
+    assert list(error.value.problems) == ["T4"]
+
+
+def test_speed_limits_are_settings_and_zero_minutes_is_flagged():
+    trip = ({"T": "X"}, {"T": 15.0}, {"T": 0}, {"T": 45 * 60})  # 20 km/h
+    assert trip_speed_problems(*trip, min_kmh=25, max_kmh=60)["T"]["kmh"] == 20.0
+    assert trip_speed_problems({"T": "X"}, {"T": 5.0}, {"T": 60}, {"T": 60})["T"]["kmh"] is None

@@ -20,6 +20,11 @@ from pathlib import Path
 # GTFS route types that are buses: 3 (bus) and the extended bus range 700-799.
 BUS_ROUTE_TYPES = {"3"} | {str(n) for n in range(700, 800)}
 MIN_BLOCK_COVERAGE = 0.95
+# Plausible average speed of one bus trip (its distance / its scheduled duration). A trip outside
+# this range points to a data error: 0 km, a distance in the wrong unit (metres read as km),
+# or a wrong schedule.
+MIN_TRIP_SPEED_KMH = 3
+MAX_TRIP_SPEED_KMH = 70  # 60 flagged rural intercity trips (Dublin route 120D, 61.4 km/h)
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
 
@@ -51,6 +56,51 @@ class BlockCoverageError(Exception):
             f"at least {MIN_BLOCK_COVERAGE:.0%} is needed, otherwise the trips without one "
             f"would be silently left out of every block."
         )
+
+
+class TripSpeedError(Exception):
+    """Some bus trips have an implausible average speed (distance / scheduled duration).
+
+    problems maps each affected trip_id to {"block", "km", "minutes", "kmh"}.
+    """
+
+    def __init__(self, problems, min_kmh=MIN_TRIP_SPEED_KMH, max_kmh=MAX_TRIP_SPEED_KMH):
+        self.problems = problems
+        def describe(trip_id, p):
+            speed = "infinite" if p["kmh"] is None else f"{p['kmh']:.1f}"
+            return f"trip {trip_id} (block {p['block']}: {p['km']:g} km in {p['minutes']:g} min = {speed} km/h)"
+
+        listed = ", ".join(describe(t, p) for t, p in sorted(problems.items())[:10])
+        more = f" and {len(problems) - 10} more" if len(problems) > 10 else ""
+        super().__init__(
+            f"{len(problems)} bus trip(s) have an average speed outside {min_kmh}-{max_kmh} km/h, "
+            f"which points to a wrong distance or schedule: {listed}{more}"
+        )
+
+
+def trip_speed_problems(trip_block, lengths, starts, ends,
+                        min_kmh=MIN_TRIP_SPEED_KMH, max_kmh=MAX_TRIP_SPEED_KMH):
+    """{trip_id: {"block", "km", "minutes", "kmh"}} for trips whose km / scheduled hours is
+    outside min_kmh-max_kmh. A trip scheduled to take 0 minutes is flagged (kmh None: infinite);
+    a trip without a distance or times can't be checked here and is skipped."""
+    problems = {}
+    for trip_id, block_id in trip_block.items():
+        if trip_id not in lengths or trip_id not in starts or trip_id not in ends:
+            continue
+        km, seconds = lengths[trip_id], ends[trip_id] - starts[trip_id]
+        kmh = km / (seconds / 3600) if seconds > 0 else None
+        if kmh is None or not min_kmh <= kmh <= max_kmh:
+            problems[trip_id] = {"block": block_id, "km": round(km, 3), "minutes": round(seconds / 60, 1),
+                                 "kmh": None if kmh is None else round(kmh, 1)}
+    return problems
+
+
+def check_trip_speeds(trip_block, lengths, starts, ends,
+                      min_kmh=MIN_TRIP_SPEED_KMH, max_kmh=MAX_TRIP_SPEED_KMH):
+    """Raise TripSpeedError if any trip's average speed is implausible (see trip_speed_problems)."""
+    problems = trip_speed_problems(trip_block, lengths, starts, ends, min_kmh, max_kmh)
+    if problems:
+        raise TripSpeedError(problems, min_kmh, max_kmh)
 
 
 def _read_table(zf, name):
@@ -201,14 +251,17 @@ def daily_block_distance(feed_path, service_date: date) -> dict[str, float]:
     route types count. Deadhead (empty running between trips or to/from the garage) is not
     in GTFS, so it is not counted.
 
-    Raises BlockCoverageError if under 95% of that day's bus trips have a block_id, and
-    MissingDistanceError if any of them has no shape_dist_traveled values, rather than
-    silently leaving trips out or counting them as 0 km.
+    Raises BlockCoverageError if under 95% of that day's bus trips have a block_id,
+    MissingDistanceError if any of them has no shape_dist_traveled values, and TripSpeedError
+    if any trip's distance / scheduled duration is outside MIN_TRIP_SPEED_KMH-MAX_TRIP_SPEED_KMH,
+    rather than silently leaving trips out or counting wrong distances.
     """
     with zipfile.ZipFile(feed_path) as zf:
         trip_block = _bus_trip_blocks(zf, service_date)
-        lengths, _, _ = _trip_lengths_and_times(zf, trip_block)
-    return _block_distances(trip_block, lengths)
+        lengths, starts, ends = _trip_lengths_and_times(zf, trip_block)
+    distances = _block_distances(trip_block, lengths)
+    check_trip_speeds(trip_block, lengths, starts, ends)
+    return distances
 
 
 def daily_block_duration(feed_path, service_date: date) -> dict[str, float]:
