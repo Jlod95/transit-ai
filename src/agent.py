@@ -238,7 +238,9 @@ TOOLS += [
             "the annual CO2 saved by not burning diesel. Annual km = design-day km x a "
             "placeholder number of service days. Use for questions about cost, savings, payback "
             "or emissions. Bus price, diesel use and the CO2 factor are sourced; electricity and "
-            "diesel prices and service days are PLACEHOLDERS; one currency (CAD) for all agencies."
+            "diesel prices and service days are PLACEHOLDERS. Prices are Halifax-based Canadian dollars; "
+            "costs are reported in the agency's currency (CAD Halifax, EUR Dublin, GBP London), "
+            "converted at Bank of Canada 2025 average rates, not local prices."
         ),
         "input_schema": AGENCY_SEASON_SCHEMA,
         "strict": True,

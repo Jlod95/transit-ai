@@ -9,6 +9,7 @@ Any setting can be overridden by keyword (tests do).
 import math
 
 from config import assumptions
+from src.agencies import AGENCIES
 from src.feasibility import range_km_for
 from src.summaries import design_day
 
@@ -107,14 +108,22 @@ def charging_needs(summary, season, **overrides):
 
 
 def cost_and_co2(summary, season, **overrides):
-    """Crude capital cost, annual energy cost electric vs diesel, and annual CO2 saved."""
+    """Crude capital cost, annual energy cost electric vs diesel, and annual CO2 saved.
+
+    Money is reported in the agency's currency (Agency.currency, or a "report_currency"
+    override): the prices are converted from their own currency at cad_per_currency_unit."""
     fleet = fleet_size(summary, season, **overrides)
     charging = charging_needs(summary, season, **overrides)
     s = {name: _setting(name, overrides) for name in (
         "buses_per_charger", "currency", "electric_bus_price", "charger_price",
         "electricity_price_per_kwh", "diesel_price_per_litre", "diesel_litres_per_km",
-        "kg_co2_per_litre_diesel", "annual_service_days",
+        "kg_co2_per_litre_diesel", "annual_service_days", "cad_per_currency_unit",
     )}
+    agency = AGENCIES.get(summary["stamp"]["agency"])
+    report_currency = overrides.get("report_currency") or (agency.currency if agency else s["currency"])
+    rates = s["cad_per_currency_unit"]
+    # Price currency -> report currency: e.g. CAD -> EUR divides by 1.5782.
+    rate = rates[report_currency] / rates[s["currency"]]
     _, _, _, used = _design_day(summary, season, overrides)
     kwh_per_km = used["kwh_per_km"]
 
@@ -133,15 +142,17 @@ def cost_and_co2(summary, season, **overrides):
     return {
         "design_day": fleet["design_day"],
         "season": season,
-        "currency": s["currency"],
+        "currency": report_currency,
+        **({"converted_from": f"{s['currency']} prices at 1 {report_currency} = {rate:g} {s['currency']}"}
+           if report_currency != s["currency"] else {}),
         "electric_buses_priced": electric_buses,
         "of_which_extra_buses": extra_buses,
         "chargers": chargers,
-        "capital_cost": round(capital),
+        "capital_cost": round(capital / rate),
         "annual_km": round(annual_km),
-        "annual_electricity_cost": round(electricity_cost),
-        "annual_diesel_cost": round(diesel_cost),
-        "annual_energy_saving": round(diesel_cost - electricity_cost),
+        "annual_electricity_cost": round(electricity_cost / rate),
+        "annual_diesel_cost": round(diesel_cost / rate),
+        "annual_energy_saving": round((diesel_cost - electricity_cost) / rate),
         "annual_co2_saved_tonnes": round(co2_tonnes, 1),
         "method": (
             "Capital = every electric bus needed (replacements for today's buses plus one "
@@ -151,7 +162,9 @@ def cost_and_co2(summary, season, **overrides):
             "not included. Annual km = design-day km x "
             "annual service days. Energy costs use this season's kWh per km all year. CO2 "
             "saved = diesel litres x kg CO2 per litre; electricity generation emissions are "
-            "not subtracted."
+            "not subtracted. Money is in the currency above; the prices under assumptions are in "
+            "their own currency (assumptions.currency) and, if that differs, were converted at "
+            "the exchange rate shown (Halifax-based prices, not local prices)."
         ),
         "assumptions": _with_sources(used, {**s, "electric_bus_price": round(s["electric_bus_price"])}),
     }

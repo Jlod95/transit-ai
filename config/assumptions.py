@@ -36,8 +36,11 @@ charging_window_hours = 6  # PLACEHOLDER - no published figure in the index
 # Depot chargers: one per bus.
 buses_per_charger = 1  # SOURCED: NREL financial analysis, p. 15
 
-# Prices, in one currency for every agency (crude: no exchange rates or local prices).
+# Prices, all in one currency (crude: Halifax-based prices, no local Irish or UK prices).
 currency = "CAD"  # Halifax's contract is in Canadian dollars
+# Canadian dollars per unit of each currency costs are reported in: Dublin answers in euros and
+# London answers in pounds are these CAD prices converted, not local prices.
+cad_per_currency_unit = {"CAD": 1.0, "EUR": 1.5782, "GBP": 1.8420}  # SOURCED: Bank of Canada, 2025 annual averages
 # All-in price of one electric bus with its charger: Halifax's contract total / 60 buses.
 electric_bus_price = 94_739_857 / 60  # SOURCED: Halifax council report, p. 2 (= 1,578,998)
 charger_price = 0  # SOURCED: included in electric_bus_price above
@@ -73,6 +76,11 @@ _HALIFAX = {
              "Buses and Chargers",
     "publisher": "Halifax Regional Council report, 17 May 2022",
     "url": "https://www.halifax.ca/media/77822",
+}
+_BANK_OF_CANADA = {
+    "title": "Annual exchange rates",
+    "publisher": "Bank of Canada",
+    "url": "https://www.bankofcanada.ca/rates/exchange/annual-average-exchange-rates/",
 }
 _IRISH = {
     "title": "Report on Diesel and Alternative-Fuel Bus Trials",
@@ -110,7 +118,12 @@ ASSUMPTION_SOURCES = {
     "charging_window_hours": _placeholder("assumed overnight window; not in the index"),
     "buses_per_charger": {**_NREL, "status": "SOURCED", "pages": "15",
                           "note": "one depot charger per bus"},
-    "currency": {"status": "CHOICE", "note": "Canadian dollars, the currency of the Halifax price"},
+    "currency": {"status": "CHOICE", "note": "Canadian dollars, the currency of the Halifax price; "
+                                            "every price above is in CAD"},
+    "cad_per_currency_unit": {**_BANK_OF_CANADA, "status": "SOURCED", "pages": "2025",
+                              "note": "2025 annual average: 1 EUR = 1.5782 CAD, 1 GBP = 1.8420 CAD; "
+                                      "used to report Halifax-based CAD costs in euros (Dublin) "
+                                      "and pounds (London)"},
     "electric_bus_price": {**_HALIFAX, "status": "SOURCED", "pages": "2",
                            "note": "all-in price per bus including its charger: "
                                    "$94,739,857 / 60 buses = $1,578,998 (CAD, net HST)"},

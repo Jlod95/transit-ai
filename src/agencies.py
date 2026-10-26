@@ -53,6 +53,7 @@ class Agency:
     operators: tuple[str, ...] = ()  # keep only these agency_names (empty = all)
     days_ahead: int | None = None  # build only this many days from the build date
     calibrate_with: str | None = None  # agency whose exact distances set the road factor
+    currency: str = "CAD"  # cost answers are reported in this currency (converted from CAD prices)
     note: str = ""
 
 
@@ -70,6 +71,7 @@ AGENCIES = {
         feeds=("data/raw/dublin_bus.zip", "data/raw/dublin_goahead.zip"),
         distance="shapes",
         blocks="gtfs",
+        currency="EUR",
     ),
     "london": Agency(
         key="london",
@@ -78,6 +80,7 @@ AGENCIES = {
         distance="straight_line",
         blocks="inferred",
         operators=TFL_OPERATORS,
+        currency="GBP",
         days_ahead=28,
         calibrate_with="dublin",
         note="TfL buses approximated by operator; only the 28 days from the build date are built.",

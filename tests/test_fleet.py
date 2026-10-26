@@ -135,3 +135,19 @@ def test_winter_energy_cites_both_sources(summary):
 def test_shares_over_range_are_returned(summary):
     # Tiny battery: B (30 km) is over the 25 km range, A (25 km) fits: 1 of 2 = 50% over.
     assert fleet_size(summary, "winter", **TINY_BATTERY)["pct_over_range"] == 50.0
+
+
+def test_costs_are_reported_in_the_agencys_currency(mini_feed):
+    # The same mini feed and CAD prices, built as Dublin (EUR), London (GBP) and an agency with
+    # no currency set (CAD): money is divided by the rate, everything else is unchanged.
+    rates = {"CAD": 1.0, "EUR": 1.5, "GBP": 2.0}
+    cad = cost_and_co2(build_summary(mini_feed, "mini"), "winter", **SETTINGS, cad_per_currency_unit=rates)
+    eur = cost_and_co2(build_summary(mini_feed, "dublin"), "winter", **SETTINGS, cad_per_currency_unit=rates)
+    gbp = cost_and_co2(build_summary(mini_feed, "london"), "winter", **SETTINGS, cad_per_currency_unit=rates)
+    assert (cad["currency"], eur["currency"], gbp["currency"]) == ("CAD", "EUR", "GBP")
+    assert "converted_from" not in cad
+    assert eur["converted_from"] == "CAD prices at 1 EUR = 1.5 CAD"
+    assert eur["capital_cost"] == round(cad["capital_cost"] / 1.5)
+    assert abs(gbp["annual_energy_saving"] - cad["annual_energy_saving"] / 2.0) <= 1  # rounding
+    assert gbp["annual_co2_saved_tonnes"] == cad["annual_co2_saved_tonnes"]
+    assert gbp["assumptions"]["electric_bus_price"] == SETTINGS["electric_bus_price"]  # prices stay CAD
