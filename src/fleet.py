@@ -143,7 +143,14 @@ def cost_and_co2(summary, season, **overrides):
         "design_day": fleet["design_day"],
         "season": season,
         "currency": report_currency,
-        **({"converted_from": f"{s['currency']} prices at 1 {report_currency} = {rate:g} {s['currency']}"}
+        **({"converted_from": f"{s['currency']} prices at 1 {report_currency} = {rate:g} {s['currency']}",
+            # The price inputs in the report currency too, so no conversion is left to the reader.
+            f"prices_in_{report_currency}": {
+                "electric_bus_price": round(s["electric_bus_price"] / rate),
+                "charger_price": round(s["charger_price"] / rate),
+                "electricity_price_per_kwh": round(s["electricity_price_per_kwh"] / rate, 3),
+                "diesel_price_per_litre": round(s["diesel_price_per_litre"] / rate, 3),
+            }}
            if report_currency != s["currency"] else {}),
         "electric_buses_priced": electric_buses,
         "of_which_extra_buses": extra_buses,
@@ -162,9 +169,10 @@ def cost_and_co2(summary, season, **overrides):
             "not included. Annual km = design-day km x "
             "annual service days. Energy costs use this season's kWh per km all year. CO2 "
             "saved = diesel litres x kg CO2 per litre; electricity generation emissions are "
-            "not subtracted. Money is in the currency above; the prices under assumptions are in "
-            "their own currency (assumptions.currency) and, if that differs, were converted at "
-            "the exchange rate shown (Halifax-based prices, not local prices)."
+            "not subtracted. Money is in the currency above. The prices under assumptions are in "
+            "their own currency (assumptions.currency); if that differs, prices_in_<currency> "
+            "gives them converted at the exchange rate shown (Halifax-based prices, not local "
+            "prices)."
         ),
         "assumptions": _with_sources(used, {**s, "electric_bus_price": round(s["electric_bus_price"])}),
     }

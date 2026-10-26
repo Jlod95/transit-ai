@@ -151,3 +151,7 @@ def test_costs_are_reported_in_the_agencys_currency(mini_feed):
     assert abs(gbp["annual_energy_saving"] - cad["annual_energy_saving"] / 2.0) <= 1  # rounding
     assert gbp["annual_co2_saved_tonnes"] == cad["annual_co2_saved_tonnes"]
     assert gbp["assumptions"]["electric_bus_price"] == SETTINGS["electric_bus_price"]  # prices stay CAD
+    # ...and are also given converted, so an answer never has to relabel a CAD price as pounds.
+    assert gbp["prices_in_GBP"] == {"electric_bus_price": 600_000, "charger_price": 75_000,
+                                    "electricity_price_per_kwh": 0.075, "diesel_price_per_litre": 0.85}
+    assert "prices_in_CAD" not in cad
