@@ -1,0 +1,119 @@
+{
+ "question": "How far does Halifax block 722145 drive on 14 October 2026, and how many electric buses would Halifax need in winter?",
+ "agency": "halifax",
+ "tools": [
+  "get_block_distance",
+  "get_fleet_size"
+ ],
+ "columns": [
+  {
+   "label": "Your loop \u00b7 Sonnet 5.5",
+   "price": [
+    2.0,
+    10.0
+   ],
+   "answer": "**Block 722145 on 14 October 2026:** it drives **80.5 revenue km**. That counts only trips carrying passengers, not empty running to or from the garage. The distance is exact, taken from the feed's shape_dist_traveled. The block is the one published in the feed.\n\n**Electric buses needed in winter:** Halifax would need about **414 electric buses**. It runs **284 buses** today. This is a crude estimate.\n- **Method:** Today's bus count is the most blocks in service at the same moment on the design day, 24 August 2026. That day has 461 blocks in service. Each block longer than one charge's range needs one extra bus.\n- **Range:** The winter range is 163.9 km. 130 blocks (28.2%) are over that range.\n- **Replacement ratio:** The ratio is 1.458, against a benchmark of 1.2. The benchmark is a **PLACEHOLDER**: a commonly quoted planning figure that isn't in the index.\n- **Limits:** The estimate assumes one overnight charge and no daytime charging. It counts revenue km only and includes no spare buses.\n\n**Assumptions:**\n- **Battery size:** The nominal battery is 400 kWh. The source is TTC's Green Bus Program: Final Results of TTC's Head-to-Head eBus Evaluation, p. 55 (https://www.ttc.ca/All-public-meetings/board/2022/Board-Meeting-Apr-14). It is SOURCED.\n- **Usable share:** The usable fraction is 0.7125, or 285 kWh. It comes from the same TTC source, p. 55, and is SOURCED.\n- **Winter energy use:** The figure is 1.7385 kWh/km. It is SOURCED from Vehvil\u00e4inen et al., \"Setting Up and Operating Electric City Buses in Harsh Winter Conditions\", Applied Sciences 12(6) 2762, 2022, p. 1 (https://www.mdpi.com/2076-3417/12/6/2762).\n  - It is TTC's summer figure of 1.22 multiplied by 1.425. That is the midpoint of the Finnish finding that winter use is 40\u201345% higher.\n  - TTC's own winter figure was not used, because its buses also burned diesel for heating.\n\n**Data snapshot:** The figures come from the halifax.zip feed, version 2026_08_August_20260806. The timetable covers 2026-08-24 to 2026-11-29.",
+   "tool_calls": [
+    {
+     "name": "get_block_distance",
+     "input": {
+      "agency": "halifax",
+      "block_id": "722145",
+      "date": "2026-10-14"
+     },
+     "result": "Block 722145 drives 80.5 revenue km on 2026-10-14."
+    },
+    {
+     "name": "get_fleet_size",
+     "input": {
+      "agency": "halifax",
+      "season": "winter"
+     },
+     "result": "{\"design_day\": \"2026-08-24\", \"season\": \"winter\", \"range_km\": 163.9, \"blocks_in_service\": 461, \"buses_needed_today\": 284, \"blocks_over_range\": 130, \"pct_over_range\": 28.2, \"electric_buses_needed\": 414, \"replacement_ratio\": 1.458, \"benchmark_ratio\": 1.2, \"method\": \"Buses today = the most blocks in service at the same moment on the design day. Each block over one charge's range needs one extra bus (crude: assumes a fresh bus swaps in mid-day). Ratio = electric buses / buses today. Spare buses not included.\", \"assumptions\": {\"nominal_battery_kwh\": 400, \"usable_fraction\": 0.7125, \"usable_kwh\": 285.0, \"kwh_per_km\": 1.7385, \"notes\": \"One overnight charge, no daytime charging; revenue km only (no deadhead).\", \"replacement_ratio_benchmark\": 1.2, \"sources\": {\"nominal_battery_kwh\": {\"title\": \"TTC's Green Bus Program: Final Results of TTC's Head-to-Head eBus Evaluation\", \"publisher\": \"Toronto Transit Commission\", \"url\": \"https://www.ttc.ca/All-public-meetings/board/2022/Board-Meeting-Apr-14\", \"status\": \"SOURCED\", \"pages\": \"55\", \"note\": \"New Flyer 40-ft bus battery, 400 kWh\"}, \"usable_fraction\": {\"title\": \"TTC's Green Bus Program: Final Results of TTC's Head-to-Head eBus Evaluation\", \"publisher\": \"Toronto Transit Commission\", \"url\": \"https://www.ttc.ca/All-public-meetings/board/2022/Board-Meeting-Apr-14\", \"status\": \"SOURCED\", \"pages\": \"55\", \"note\": \"285 usable / 400 kWh = 0.7125, measured in service\"}, \"kwh_per_km\": {\"status\": \"SOURCED\", \"title\": \"Setting Up and Operating Electric City Buses in Harsh Winter Conditions\", \"publisher\": \"Vehvil\\u00e4inen et al., Applied Sciences 12(6) 2762, 2022 (CC BY 4.0)\", \"url\": \"https://www.mdpi.com/2076-3417/12/6/2762\", \"pages\": \"1\", \"note\": \"1.22 (TTC summer) x 1.425, the midpoint of the Finnish finding that winter use is 40-45% higher than summer = 1.7385 kWh/km. TTC's own winter figure (1.40, p. 55) is not used because its New Flyer buses also burned diesel for heating (pp. 47, 61)\"}, \"replacement_ratio_benchmark\": {\"status\": \"PLACEHOLDER\", \"note\": \"commonly quoted planning figure; not in the index\"}}}, \"data_snapshot\": {\"agency\": \"Halifax Transit\", \"feeds\": [\"halifax.zip version 2026_08_August_20260806 sha256 f5d95091c813\"], \"timetable_covers\": \"2026-08-24 to 2026-11-29\", \"dates_built\": \"whole timetable\", \"distance_method\": \"exact: shape_dist_traveled in stop_times.txt\", \"block_method\": \"published: the feed's block_id\", \"summary_built\": \"2026-10-22T00:04:08Z\"}}"
+    }
+   ],
+   "rounds": [
+    [
+     1548,
+     176
+    ],
+    [
+     2930,
+     817
+    ]
+   ],
+   "cost_usd": null
+  },
+  {
+   "label": "Your loop \u00b7 gpt-4.1-mini (OpenRouter)",
+   "answer": "On 14 October 2026, Halifax block 722145 drives 80.5 revenue kilometers.\n\nFor winter operation, Halifax would need 414 electric buses under the assumptions given:\n- One overnight charge with no daytime charging,\n- Nominal battery size of 400 kWh with 285 kWh usable,\n- Energy use of 1.7385 kWh per km in winter,\n- The fleet size estimate accounts for blocks over the electric bus range needing additional buses.\n\nThis estimate is based on the most blocks in service at the same moment on a design day in winter and assumes one extra bus for each block that exceeds the electric bus range (163.9 km). Spare buses are not included. \n\nThe data is from the Halifax 2026 timetable feed (version halifax.zip 2026_08_August_20260806). The replacement ratio of electric to current buses is about 1.458, which is higher than the commonly used 1.2 planning benchmark.\n\nSources:\n- TTC's Green Bus Program on battery and usable fraction\n- Vehvil\u00e4inen et al. 2022 for winter energy use\n- Halifax 2026 timetable data",
+   "tool_calls": [
+    {
+     "name": "get_block_distance",
+     "input": {
+      "agency": "halifax",
+      "block_id": "722145",
+      "date": "2026-10-14"
+     },
+     "result": "Block 722145 drives 80.5 revenue km on 2026-10-14."
+    },
+    {
+     "name": "get_fleet_size",
+     "input": {
+      "agency": "halifax",
+      "season": "winter"
+     },
+     "result": "{\"design_day\": \"2026-08-24\", \"season\": \"winter\", \"range_km\": 163.9, \"blocks_in_service\": 461, \"buses_needed_today\": 284, \"blocks_over_range\": 130, \"pct_over_range\": 28.2, \"electric_buses_needed\": 414, \"replacement_ratio\": 1.458, \"benchmark_ratio\": 1.2, \"method\": \"Buses today = the most blocks in service at the same moment on the design day. Each block over one charge's range needs one extra bus (crude: assumes a fresh bus swaps in mid-day). Ratio = electric buses / buses today. Spare buses not included.\", \"assumptions\": {\"nominal_battery_kwh\": 400, \"usable_fraction\": 0.7125, \"usable_kwh\": 285.0, \"kwh_per_km\": 1.7385, \"notes\": \"One overnight charge, no daytime charging; revenue km only (no deadhead).\", \"replacement_ratio_benchmark\": 1.2, \"sources\": {\"nominal_battery_kwh\": {\"title\": \"TTC's Green Bus Program: Final Results of TTC's Head-to-Head eBus Evaluation\", \"publisher\": \"Toronto Transit Commission\", \"url\": \"https://www.ttc.ca/All-public-meetings/board/2022/Board-Meeting-Apr-14\", \"status\": \"SOURCED\", \"pages\": \"55\", \"note\": \"New Flyer 40-ft bus battery, 400 kWh\"}, \"usable_fraction\": {\"title\": \"TTC's Green Bus Program: Final Results of TTC's Head-to-Head eBus Evaluation\", \"publisher\": \"Toronto Transit Commission\", \"url\": \"https://www.ttc.ca/All-public-meetings/board/2022/Board-Meeting-Apr-14\", \"status\": \"SOURCED\", \"pages\": \"55\", \"note\": \"285 usable / 400 kWh = 0.7125, measured in service\"}, \"kwh_per_km\": {\"status\": \"SOURCED\", \"title\": \"Setting Up and Operating Electric City Buses in Harsh Winter Conditions\", \"publisher\": \"Vehvil\\u00e4inen et al., Applied Sciences 12(6) 2762, 2022 (CC BY 4.0)\", \"url\": \"https://www.mdpi.com/2076-3417/12/6/2762\", \"pages\": \"1\", \"note\": \"1.22 (TTC summer) x 1.425, the midpoint of the Finnish finding that winter use is 40-45% higher than summer = 1.7385 kWh/km. TTC's own winter figure (1.40, p. 55) is not used because its New Flyer buses also burned diesel for heating (pp. 47, 61)\"}, \"replacement_ratio_benchmark\": {\"status\": \"PLACEHOLDER\", \"note\": \"commonly quoted planning figure; not in the index\"}}}, \"data_snapshot\": {\"agency\": \"Halifax Transit\", \"feeds\": [\"halifax.zip version 2026_08_August_20260806 sha256 f5d95091c813\"], \"timetable_covers\": \"2026-08-24 to 2026-11-29\", \"dates_built\": \"whole timetable\", \"distance_method\": \"exact: shape_dist_traveled in stop_times.txt\", \"block_method\": \"published: the feed's block_id\", \"summary_built\": \"2026-10-22T00:04:08Z\"}}"
+    }
+   ],
+   "rounds": [
+    [
+     752,
+     69
+    ],
+    [
+     1849,
+     155
+    ]
+   ],
+   "cost_usd": 0.0008612
+  },
+  {
+   "label": "Foundry agent \u00b7 gpt-4.1-mini",
+   "price": [
+    0.4,
+    1.6
+   ],
+   "answer": "On 14 October 2026, Halifax block 722145 drives 80.5 revenue kilometers.\n\nFor winter, Halifax would need 414 electric buses compared to 284 buses needed today for the most blocks in service simultaneously on its design day (24 August 2026). This reflects a replacement ratio of 1.458, meaning more electric buses are required due to range limitations and mid-day bus swaps. The assumptions include a 400 kWh nominal battery with 285 kWh usable capacity and 1.7385 kWh per km energy use in winter.\n\nThe method used counts all blocks in service at peak time and adds one extra bus for each block exceeding one battery charge's range (163.9 km). This is a crude estimate without spare buses.\n\nSources:  \n- Block distance and fleet data from Halifax Transit feed \"halifax.zip version 2026_08_August_20260806\" (covering late Aug to Nov 2026)  \n- Battery and energy use assumptions from \"TTC's Green Bus Program: Final Results of TTC's Head-to-Head eBus Evaluation\" and \"Setting Up and Operating Electric City Buses in Harsh Winter Conditions\" (Vehvil\u00e4inen et al., 2022)",
+   "tool_calls": [
+    {
+     "name": "get_block_distance",
+     "input": {
+      "agency": "halifax",
+      "block_id": "722145",
+      "date": "2026-10-14"
+     },
+     "result": "Block 722145 drives 80.5 revenue km on 2026-10-14."
+    },
+    {
+     "name": "get_fleet_size",
+     "input": {
+      "agency": "halifax",
+      "season": "winter"
+     },
+     "result": "{\"design_day\": \"2026-08-24\", \"season\": \"winter\", \"range_km\": 163.9, \"blocks_in_service\": 461, \"buses_needed_today\": 284, \"blocks_over_range\": 130, \"pct_over_range\": 28.2, \"electric_buses_needed\": 414, \"replacement_ratio\": 1.458, \"benchmark_ratio\": 1.2, \"method\": \"Buses today = the most blocks in service at the same moment on the design day. Each block over one charge's range needs one extra bus (crude: assumes a fresh bus swaps in mid-day). Ratio = electric buses / buses today. Spare buses not included.\", \"assumptions\": {\"nominal_battery_kwh\": 400, \"usable_fraction\": 0.7125, \"usable_kwh\": 285.0, \"kwh_per_km\": 1.7385, \"notes\": \"One overnight charge, no daytime charging; revenue km only (no deadhead).\", \"replacement_ratio_benchmark\": 1.2, \"sources\": {\"nominal_battery_kwh\": {\"title\": \"TTC's Green Bus Program: Final Results of TTC's Head-to-Head eBus Evaluation\", \"publisher\": \"Toronto Transit Commission\", \"url\": \"https://www.ttc.ca/All-public-meetings/board/2022/Board-Meeting-Apr-14\", \"status\": \"SOURCED\", \"pages\": \"55\", \"note\": \"New Flyer 40-ft bus battery, 400 kWh\"}, \"usable_fraction\": {\"title\": \"TTC's Green Bus Program: Final Results of TTC's Head-to-Head eBus Evaluation\", \"publisher\": \"Toronto Transit Commission\", \"url\": \"https://www.ttc.ca/All-public-meetings/board/2022/Board-Meeting-Apr-14\", \"status\": \"SOURCED\", \"pages\": \"55\", \"note\": \"285 usable / 400 kWh = 0.7125, measured in service\"}, \"kwh_per_km\": {\"status\": \"SOURCED\", \"title\": \"Setting Up and Operating Electric City Buses in Harsh Winter Conditions\", \"publisher\": \"Vehvil\\u00e4inen et al., Applied Sciences 12(6) 2762, 2022 (CC BY 4.0)\", \"url\": \"https://www.mdpi.com/2076-3417/12/6/2762\", \"pages\": \"1\", \"note\": \"1.22 (TTC summer) x 1.425, the midpoint of the Finnish finding that winter use is 40-45% higher than summer = 1.7385 kWh/km. TTC's own winter figure (1.40, p. 55) is not used because its New Flyer buses also burned diesel for heating (pp. 47, 61)\"}, \"replacement_ratio_benchmark\": {\"status\": \"PLACEHOLDER\", \"note\": \"commonly quoted planning figure; not in the index\"}}}, \"data_snapshot\": {\"agency\": \"Halifax Transit\", \"feeds\": [\"halifax.zip version 2026_08_August_20260806 sha256 f5d95091c813\"], \"timetable_covers\": \"2026-08-24 to 2026-11-29\", \"dates_built\": \"whole timetable\", \"distance_method\": \"exact: shape_dist_traveled in stop_times.txt\", \"block_method\": \"published: the feed's block_id\", \"summary_built\": \"2026-10-22T00:04:08Z\"}}"
+    }
+   ],
+   "rounds": [
+    [
+     752,
+     69
+    ],
+    [
+     1608,
+     255
+    ]
+   ]
+  }
+ ]
+}
